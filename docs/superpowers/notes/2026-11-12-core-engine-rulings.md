@@ -43,3 +43,13 @@
 - Ruling R15: 浸水深 0m に [0, 0, 0] を加えた（出典は 0.1m から） — 誤りの場合: 0〜0.1m の浸水で被害を過小評価。
 - 決定（ユーザー承認 2026-11-12）: 時間差発生は出典 p.10 に国の手法がある（1回目で半壊した建物は計測震度+0.5 と同じ全壊率）。国の手法に切り替えた。
 - 決定（ユーザー承認 2026-11-12）: S造・RC造は階数で被害が大きく違う（RC 1〜6階 58% / 11〜15階 94% @7.0）。現行 R8 は全階数の最大値。階数の入力を加えた（未入力時は従来どおり包絡、16階以上は被害なし）。周辺推計は建物データに階数がないため包絡のまま。
+
+## 三重県データ加工と照合 v2（2026-11-12）
+- Ruling P1: 建物ストックの CLI が municipality_meshes.json も出力する — 照合が依存 — 誤りの場合: 影響なし。
+- Ruling P2: 住宅統計の県計は第6-1表から取り、年代を3区分にまとめ直す（第6-3表に県計がないため）— 誤りの場合: 県計で代用した10町の割合がわずかにずれる。
+- Ruling P3: 県・内閣府の公表値は陸側ケースなので、照合は L2_RIKU（Eq_2）で行う — 誤りの場合: ハザードのケースが1つ増えるだけ。
+- 決定（ユーザー承認）: 地域の合計は代表的な曲線、自宅は該当クラスの最小〜最大の幅で示す（R8 の包絡を置き換え）。根拠: 包絡のままだと県計が内閣府推計の 1.39 倍、代表的な曲線では 1.06 倍。
+- テストの fixture から内閣府の元データの行を除き、ブランチはスカッシュして取り込んだ（元データの行を含むコミットは履歴に残していない）。
+Task 1: minor (deferred): PL<0→None untested; stale mesh2 files not cleared on rerun; hard-coded probe; processedDate churn
+Task 2: minor (deferred): ValueError as control flow for fallback; name-mismatch error wording; double parse_kotei; no test for 9 vs 7 era layout / 専用住宅 terminator; boundary-point drop
+Task 3: minor (deferred): skipped-mesh count not reported; published<=0 treated as '-'; dead existsSync; report test weak; computeMunicipality untested; housing source label
