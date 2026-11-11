@@ -1,6 +1,7 @@
 """内閣府 南海トラフ巨大地震 データセットA の CSV → メッシュ別ハザード JSON。
 
 出力: {out_dir}/{case}/{mesh2}.json = {"<mesh250>": [Ia, PL, settlementCm, None, None]}
+      {out_dir}/{case}/index.json = 書き出した2次メッシュコードの昇順リスト（アプリの対応範囲）
 """
 import argparse
 import csv
@@ -47,6 +48,11 @@ def build_hazard(eq_csv: Path, liq_csv: Path, case: str, out_dir: Path) -> int:
         (case_dir / f"{mesh2}.json").write_text(
             json.dumps(data, separators=(",", ":")), encoding="utf-8"
         )
+    # 対応範囲。アプリはここに無い2次メッシュを「まだ対応していない地域」、
+    # ここにあるのにファイルが読めない場合を「読み込み失敗」として扱う。
+    (case_dir / "index.json").write_text(
+        json.dumps(sorted(groups), separators=(",", ":")), encoding="utf-8"
+    )
     return count
 
 

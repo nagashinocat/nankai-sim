@@ -53,3 +53,18 @@
 Task 1: minor (deferred): PL<0→None untested; stale mesh2 files not cleared on rerun; hard-coded probe; processedDate churn
 Task 2: minor (deferred): ValueError as control flow for fallback; name-mismatch error wording; double parse_kotei; no test for 9 vs 7 era layout / 専用住宅 terminator; boundary-point drop
 Task 3: minor (deferred): skipped-mesh count not reported; published<=0 treated as '-'; dead existsSync; report test weak; computeMunicipality untested; housing source label
+
+## Web app v1 — rulings and deferred items (2026-11-12)
+
+Rulings: W1 shelters CSV is UTF-8 with BOM (utf-8-sig). W2 directions link carries only the shelter's coordinates. W4 Playwright uses system Chrome when present. W5 mobile-first. W6 a missing data file may come back as index.html (200) → treated as missing; hosts must disable SPA fallback. F1 coverage = `{case}/index.json`; outside → 「この地域はまだ対応していません」+ hazard map portal link; missing data inside coverage → load error with retry; build:public fails without hazard data. F2 always-visible tsunami notice and tsunami shelter list. F3 saved result keeps shelter names/distances/walk times only (no coordinates). F4 show 「{label} 付近で計算しました」.
+
+Deferred:
+- MUST before enabling tsunami data: reach wording assumes no evacuation start delay — add a start delay and soften 'ok' wording.
+- Service worker: an open old-version page can miss old hashed assets offline after an update; /data cache is unbounded (≤ full dataset).
+- Text says only Mie is covered, while hazard index includes neighbouring prefectures (home result works; area shows no building data).
+- Publish gate does not verify that every mesh2 in index.json is present in dist.
+- Outside address: area section says 建物データなし though hazard is what's missing.
+- Retry button reuses the building inputs of the first attempt.
+- Tsunami shelters have no map pins or route link.
+- Municipality name uses plurality (not majority) at borders; nearestShelters duplicated in main.ts.
+- build:public cannot pass --base; subpath deploy runs the check manually.

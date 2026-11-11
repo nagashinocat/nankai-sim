@@ -34,7 +34,7 @@ def test_missing_liq_and_negative_s_are_null(tmp_path):
 
 def test_split_by_mesh2(tmp_path):
     _, d = run(tmp_path)
-    assert sorted(p.name for p in d.glob("*.json")) == ["513600.json", "523644.json"]
+    assert sorted(p.name for p in d.glob("??????.json")) == ["513600.json", "523644.json"]
 
 
 def test_quoted_and_unquoted_mesh(tmp_path):
@@ -69,3 +69,11 @@ def test_case_map_includes_riku():
     from pipeline.naikaku_hazard import CASES
     assert CASES["L2_RIKU"] == "2"
     assert CASES["L2"] == "champ"
+
+
+def test_coverage_index_lists_written_mesh2(tmp_path):
+    # アプリは index.json で「対応している2次メッシュ」を判定する（ファイルが無い＝範囲外、とは扱わない）
+    _, d = run(tmp_path)
+    index = json.loads((d / "index.json").read_text())
+    assert index == ["513600", "523644"]
+    assert index == sorted(p.stem for p in d.glob("??????.json"))

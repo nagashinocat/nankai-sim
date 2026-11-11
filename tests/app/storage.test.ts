@@ -1,0 +1,133 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { LAST_KEY, clearLast, loadChecklist, loadLast, saveChecklist, saveLast, savedShelters, type Saved } from '../../src/app/storage.ts';
+import type { EvacVM } from '../../src/app/viewmodel.ts';
+
+function memStore(): Storage & { raw: Map<string, string> } {
+  const raw = new Map<string, string>();
+  return {
+    raw,
+    get length() { return raw.size; },
+    clear: () => raw.clear(),
+    getItem: (k) => raw.get(k) ?? null,
+    key: (i) => [...raw.keys()][i] ?? null,
+    removeItem: (k) => void raw.delete(k),
+    setItem: (k, v) => void raw.set(k, String(v)),
+  };
+}
+
+const range = { min: '10.0%', max: '30.0%', central: '20.0%' };
+const shelters: Saved['shelters'] = [
+  { hazard: 'earthquake', items: [{ name: '菰野小学校', distance: '約300m', walkStandard: '約7分', walkSlow: '約13分' }] },
+  { hazard: 'tsunami', items: [] },
+];
+const saved: Saved = {
+  v: 2,
+  savedAt: '2026-11-12T01:23:45.000Z',
+  municipality: '菰野町',
+  input: { structure: 'wood', era: 'pre1981', floors: 2 } as never,
+  home: { status: 'ok', intensityLabel: '震度6弱', collapse: range, half: range, liquefaction: '液状化の可能性があります', notes: [] } as never,
+  area: { status: 'ok', collapse: 12, half: 30, meshes: 9 },
+  shelters,
+};
+
+test('保存→読み込みの往復', () => {
+  const s = memStore();
+  saveLast(saved, s);
+  assert.deepEqual(loadLast(s), saved);
+  assert.ok(s.raw.has('nankai-sim:last'));
+});
+
+test('何も無ければ null / 壊れた JSON → null', () => {
+  const s = memStore();
+  assert.equal(loadLast(s), null);
+  s.setItem('nankai-sim:last', '{broken');
+  assert.equal(loadLast(s), null);
+  s.setItem('nankai-sim:last', '"str"');
+  assert.equal(loadLast(s), null);
+});
+
+test('clear 後は null', () => {
+  const s = memStore();
+  saveLast(saved, s);
+  clearLast(s);
+  assert.equal(loadLast(s), null);
+});
+
+test('チェックリスト: 既定は 8 個の false、往復、壊れていれば既定', () => {
+  const s = memStore();
+  assert.deepEqual(loadChecklist(s), Array(8).fill(false));
+  const c = [true, false, true, false, false, false, false, true];
+  saveChecklist(c, s);
+  assert.deepEqual(loadChecklist(s), c);
+  s.setItem('nankai-sim:checklist', '[true]');
+  assert.deepEqual(loadChecklist(s), Array(8).fill(false));
+  s.setItem('nankai-sim:checklist', 'oops');
+  assert.deepEqual(loadChecklist(s), Array(8).fill(false));
+});
+
+test('Storage が例外を投げても外に出さない', () => {
+  const bad = {
+    ...memStore(),
+    setItem: () => { throw new Error('quota'); },
+    getItem: () => { throw new Error('denied'); },
+    removeItem: () => { throw new Error('denied'); },
+  } as Storage;
+  assert.doesNotThrow(() => saveLast(saved, bad));
+  assert.doesNotThrow(() => saveChecklist(Array(8).fill(true), bad));
+  assert.doesNotThrow(() => clearLast(bad));
+  assert.equal(loadLast(bad), null);
+  assert.deepEqual(loadChecklist(bad), Array(8).fill(false));
+});
+
+test('入れ子の値が壊れている／古いスキーマ → null', () => {
+  const s = memStore();
+  const put = (o: unknown) => s.setItem('nankai-sim:last', JSON.stringify(o));
+  const bad: unknown[] = [
+    { ...saved, v: undefined },
+    { ...saved, v: 1 }, // 旧スキーマ（避難場所なし）は読まない
+    { ...saved, v: 3 },
+    { ...saved, shelters: undefined },
+    { ...saved, shelters: [{ hazard: 'flood', items: [] }] },
+    { ...saved, shelters: [{ hazard: 'earthquake', items: [{ name: 'x' }] }] },
+    { ...saved, home: { status: 'outside' }, area: { status: 'nostock' } }, // 結果の出ない場所は保存しない
+    { ...saved, home: { status: 'nodata' } },
+    { ...saved, home: { status: 'ok' } },
+    { ...saved, home: { ...saved.home, collapse: { min: 1 } } },
+    { ...saved, home: { ...saved.home, notes: 'x' } },
+    { ...saved, home: { status: 'weird' } },
+    { ...saved, area: { status: 'ok' } },
+    { ...saved, area: { status: 'ok', collapse: '1', half: 2, meshes: 3 } },
+    { ...saved, input: null },
+    { ...saved, municipality: 5 },
+  ];
+  for (const b of bad) { put(b); assert.equal(loadLast(s), null, JSON.stringify(b)); }
+  put({ ...saved, area: { status: 'nostock' } });
+  assert.notEqual(loadLast(s), null);
+  put({ ...saved, area: { status: 'unavailable' } });
+  assert.notEqual(loadLast(s), null);
+});
+
+test('旧スキーマ（v1）は読み捨て、端末からも消す', () => {
+  const s = memStore();
+  const { shelters: _omit, ...v1 } = { ...saved, v: 1 };
+  s.setItem(LAST_KEY, JSON.stringify(v1));
+  assert.equal(loadLast(s), null);
+  assert.equal(s.raw.has(LAST_KEY), false);
+});
+
+test('savedShelters: 名前・距離・徒歩の文字列だけを残す（座標や到達判定は保存しない）', () => {
+  const evac = [
+    {
+      hazard: 'earthquake', notices: ['n'],
+      items: [{ name: 'A', distance: '約110m', walkStandard: '約3分', walkSlow: '約5分', reach: 'n/a', pos: { lat: 35.02, lon: 136.5 } }],
+    },
+    { hazard: 'tsunami', notices: ['n'], items: [] },
+  ] as unknown as EvacVM[];
+  const out = savedShelters(evac);
+  assert.deepEqual(out, [
+    { hazard: 'earthquake', items: [{ name: 'A', distance: '約110m', walkStandard: '約3分', walkSlow: '約5分' }] },
+    { hazard: 'tsunami', items: [] },
+  ]);
+  assert.doesNotMatch(JSON.stringify(out), /35\.02|136\.5|lat|lon|pos/);
+});
