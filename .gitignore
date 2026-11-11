@@ -1,0 +1,7 @@
+node_modules/
+.superpowers/
+public/data/hazard/
+public/data/shelters/
+public/data/stock/
+reports/
+__pycache__/
