@@ -29,3 +29,31 @@ test('計測震度4.5未満・浸水深0mは被害なし', () => {
   assert.deepEqual(shakeRates(4.0, 'wood', 'pre1981'), { collapse: 0, half: 0 });
   assert.deepEqual(tsunamiRates(0, 'wood'), { collapse: 0, half: 0 });
 });
+
+test('階数を指定すると、その階数区分の曲線だけを使う（RC, 計測震度7.0, 1981年以前）', () => {
+  const at7 = (cls: string) => table.shake.groups.rc!.classes[cls]!.find(([x]) => Math.abs(x - 7.0) < 1e-9)![1];
+  const low = Math.max(at7('≤1971/1-6階'), at7('1972-80/1-6階'));
+  const high = Math.max(at7('≤1971/11-15階'), at7('1972-80/11-15階'));
+  assert.equal(shakeRates(7.0, 'rc', 'pre1981', 3).collapse, low);
+  assert.equal(shakeRates(7.0, 'rc', 'pre1981', 12).collapse, high);
+  assert.ok(low < high);
+});
+
+test('階数を指定しないときは全階数の包絡（従来どおり）', () => {
+  assert.deepEqual(shakeRates(6.5, 'steel', 'pre1981'), shakeRates(6.5, 'steel', 'pre1981', 7));
+});
+
+test('16階以上の S造・RC造は被害なし（内閣府: 16階以上は損傷しない）', () => {
+  assert.deepEqual(shakeRates(7.0, 'rc', 'pre1981', 16), { collapse: 0, half: 0 });
+  assert.deepEqual(shakeRates(7.0, 'steel', 'post2000', 30), { collapse: 0, half: 0 });
+});
+
+test('木造は階数を無視する', () => {
+  assert.deepEqual(shakeRates(6.4, 'wood', 'pre1981', 2), shakeRates(6.4, 'wood', 'pre1981'));
+});
+
+test('不正な階数は RangeError', () => {
+  for (const f of [0, -1, 2.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    assert.throws(() => shakeRates(6.0, 'rc', 'pre1981', f), RangeError);
+  }
+});

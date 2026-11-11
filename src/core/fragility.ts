@@ -108,9 +108,20 @@ function interpolate(curve: Curve, x: number): [number, number] {
   return [a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
 }
 
-/** 対応クラスの全壊率・全壊+半壊率それぞれの最大値（保守的な包絡）。half = 全壊+半壊 − 全壊。 */
-function envelope(g: FragilityGroup, e: Era | null, x: number): Rates {
-  const names = e && g.eraMap ? g.eraMap[e] : Object.keys(g.classes);
+/** 内閣府: 16階以上（60m超）の建物は揺れで損傷しないものとする。 */
+export const NO_DAMAGE_FLOORS = 16;
+
+/** クラス名末尾の「a-b階」が floors を含むか。階数区分のないクラスは常に対象。 */
+function storyMatches(name: string, floors: number): boolean {
+  const m = /(\d+)-(\d+)階$/.exec(name);
+  return !m || (floors >= Number(m[1]) && floors <= Number(m[2]));
+}
+
+/** 対応クラスの全壊率・全壊+半壊率それぞれの最大値（保守的な包絡）。half = 全壊+半壊 − 全壊。
+ *  floors を渡すと、その階数を含む階数区分のクラスだけを使う。 */
+function envelope(g: FragilityGroup, e: Era | null, x: number, floors?: number): Rates {
+  let names = e && g.eraMap ? g.eraMap[e] : Object.keys(g.classes);
+  if (floors !== undefined) names = names.filter((n) => storyMatches(n, floors));
   let collapse = 0;
   let total = 0;
   for (const n of names) {
@@ -129,10 +140,18 @@ function group<G extends string>(fam: FragilityFamily<G>, key: G, label: string)
 
 const nonwood = (s: Structure): 'wood' | 'nonwood' => (s === 'wood' ? 'wood' : 'nonwood');
 
-/** 揺れ。intensity は計測震度。 */
-export function shakeRates(intensity: number, s: Structure, e: Era): Rates {
+/** 揺れ。intensity は計測震度。floors（地上階数, 1 以上の整数）は S造・RC造でのみ使い、
+ *  省略時は全階数区分の包絡。16 階以上の S造・RC造は被害なし。 */
+export function shakeRates(intensity: number, s: Structure, e: Era, floors?: number): Rates {
+  if (floors !== undefined && !(Number.isInteger(floors) && floors >= 1)) {
+    throw new RangeError(`階数は 1 以上の整数で指定してください: ${floors}`);
+  }
   const t = table();
-  return envelope(group(t.shake, s, 'shake'), e, intensity);
+  if (s !== 'wood' && floors !== undefined && floors >= NO_DAMAGE_FLOORS) {
+    if (!Number.isFinite(intensity)) throw new RangeError(`被害関数の入力が有限の数ではありません: ${intensity}`);
+    return { collapse: 0, half: 0 };
+  }
+  return envelope(group(t.shake, s, 'shake'), e, intensity, s === 'wood' ? undefined : floors);
 }
 
 /** 液状化。settlementCm は液状化による地盤沈下量(cm)。steel/rc は非木造の曲線を使う。 */

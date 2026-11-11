@@ -142,3 +142,30 @@ test('沈下量・浸水深が非有限なら null（null は従来どおり対�
   );
   assert.notEqual(estimateHome(cell({ tsunamiDepth: null }), input), null);
 });
+
+test('時間差は国の手法: 先発で半壊した分は、後発の計測震度+0.5 の全壊率で後発を受ける', () => {
+  useFragilityTable(fixture as unknown as FragilityTable);
+  const first: HazardCell = { intensity: 6.0, pl: null, settlementCm: null, tsunamiDepth: null, tsunamiArrivalMin: null };
+  const second: HazardCell = { ...first, intensity: 5.5 };
+  for (const e of ['pre1981', 'y1981_2000', 'post2000'] as const) {
+    const f = ratesForCell(first, 'wood', e)!;
+    const ri = ratesForCell(second, 'wood', e)!;
+    const rd = ratesForCell({ ...second, intensity: 6.0 }, 'wood', e)!;
+    const u = 1 - f.collapse - f.half;
+    const r = estimateLag(first, second, 'wood', e)!;
+    assert.ok(Math.abs(r.collapse - (f.collapse + u * ri.collapse + f.half * rd.collapse)) < 1e-12, e);
+    assert.ok(Math.abs(r.half - (u * ri.half + f.half * (1 - rd.collapse))) < 1e-12, e);
+  }
+});
+
+test('estimateHome は階数を渡す（RC, 階数3 と 階数12 で結果が違う）', () => {
+  useFragilityTable(fixture as unknown as FragilityTable);
+  const cell: HazardCell = { intensity: 6.5, pl: null, settlementCm: null, tsunamiDepth: null, tsunamiArrivalMin: null };
+  const lo = estimateHome(cell, { structure: 'rc', era: 'pre1981', retrofitted: false, floors: 3 })!;
+  const hi = estimateHome(cell, { structure: 'rc', era: 'pre1981', retrofitted: false, floors: 12 })!;
+  const c3 = ratesForCell(cell, 'rc', 'pre1981', 3)!.collapse;
+  const c12 = ratesForCell(cell, 'rc', 'pre1981', 12)!.collapse;
+  assert.ok(lo.collapse[0] <= c3 && c3 <= lo.collapse[1]);
+  assert.ok(hi.collapse[0] <= c12 && c12 <= hi.collapse[1]);
+  assert.ok(JSON.stringify(lo) !== JSON.stringify(hi));
+});

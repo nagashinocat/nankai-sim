@@ -20,6 +20,8 @@ export type HomeInput = {
   structure: Structure | 'unknown';
   era: Era | 'unknown';
   retrofitted: boolean;
+  /** 地上階数（S造・RC造のみ使用）。未入力なら全階数区分の包絡。 */
+  floors?: number | null;
 };
 
 export type StockKey = `${Structure}:${Era}`;
