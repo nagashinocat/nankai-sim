@@ -9,7 +9,8 @@ const EPS = 1e-7; // 浮動小数誤差で境界がずれないよう、イン�
 
 const rad = (d: number) => (d * Math.PI) / 180;
 
-function distanceM(a: LatLon, b: LatLon): number {
+/** 2点間の球面距離(m) */
+export function distanceM(a: LatLon, b: LatLon): number {
   const dLat = rad(b.lat - a.lat);
   const dLon = rad(b.lon - a.lon);
   const h =

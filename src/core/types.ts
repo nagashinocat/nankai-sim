@@ -25,3 +25,6 @@ export type HomeInput = {
 export type StockKey = `${Structure}:${Era}`;
 /** メッシュ内の建物棟数と構造×年代の構成比。shares の合計は 1。 */
 export type BuildingStock = { total: number; shares: Partial<Record<StockKey, number>> };
+
+/** 避難場所。earthquake / tsunami は指定緊急避難場所としてその災害に対応するか。 */
+export type Shelter = { id: string; name: string; pos: LatLon; earthquake: boolean; tsunami: boolean };
