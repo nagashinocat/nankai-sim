@@ -1,4 +1,4 @@
-// @types/node が入手できないオフライン環境用の最小宣言。@types/node 導入後は削除してよい。
+// @types/node が入手できないオフライン環境用の最小宣言。@types/node を導入するコミットで、このファイルを同じコミット内で必ず削除すること。
 declare module 'node:test' {
   export function test(name: string, fn: () => void | Promise<void>): void;
 }
