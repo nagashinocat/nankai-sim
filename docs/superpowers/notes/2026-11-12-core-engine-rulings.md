@@ -36,3 +36,10 @@
 - Task 3: minor (deferred): estimateLag ignores retrofit (brief formula has no retrofit input)
 - Task 4: minor (deferred): negative/NaN individual shares not rejected; duplicate meshes double-counted; unchecked StockKey split for JSON input; shares check only on counted meshes
 - Task 5: minor (deferred): no guard for speedMps<=0/NaN; NaN walkMin → 'no' undocumented; TDD red step not observed
+
+## 被害関数データの転記（2026-11-12 追加）
+- Ruling R13: 計測震度 4.5 未満は被害なしとして [4.5, 0, 0] を加えた — 出典の図は 5.0 からで、5.0 の値で固定すると震度4でも数%の被害が出てしまう — 誤りの場合: 4.5〜5.0 の被害をわずかに過小評価。
+- Ruling R14: 液状化は出典に全壊率しかないため半壊を 0 とした — 誤りの場合: 液状化による半壊を過小評価。
+- Ruling R15: 浸水深 0m に [0, 0, 0] を加えた（出典は 0.1m から） — 誤りの場合: 0〜0.1m の浸水で被害を過小評価。
+- 未決（要相談）: 時間差発生は出典 p.10 に国の手法がある（1回目で半壊した建物は計測震度+0.5 と同じ全壊率）。現行の独自手法（ひとつ古い年代）から切り替えるか。
+- 未決（要相談）: S造・RC造は階数で被害が大きく違う（RC 1〜6階 58% / 11〜15階 94% @7.0）。現行 R8 は全階数の最大値。階数の入力を加えるか。

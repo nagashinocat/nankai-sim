@@ -155,4 +155,4 @@ test('非有限の入力は RangeError（0 被害にしない）', () => {
   }
 });
 
-test.todo('転記の抜き取り確認: 資料の代表点 3 点と一致（実データ転記後に追加。docs/fragility-data-todo.md 参照）');
+// 実データの抜き取り確認は tests/core/fragility.real.test.ts に移動
