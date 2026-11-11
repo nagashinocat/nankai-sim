@@ -9,6 +9,16 @@ const stock: Record<string, number> = {
   'wood:y1981_2000': 1120 + 2480, 'rc:y1981_2000': 70 + 710, 'steel:y1981_2000': 100 + 510,
   'wood:post2000': 1670 + 2230 + 590, 'rc:post2000': 330 + 520 + 30, 'steel:post2000': 460 + 400 + 90,
 };
+// 固定資産の価格等の概要調書（令和6年度）菰野町: 木造 24,209 棟・木造以外 11,369 棟。
+// 住宅統計の構造・年代の割合で按分し、全建物（棟）に拡大する。
+const WOOD = 24209, NONWOOD = 11369;
+if (process.env.SCALE === '1') {
+  const w = Object.entries(stock).filter(([k]) => k.startsWith('wood'));
+  const n = Object.entries(stock).filter(([k]) => !k.startsWith('wood'));
+  const ws = w.reduce((a, [, v]) => a + v, 0), ns = n.reduce((a, [, v]) => a + v, 0);
+  for (const [k, v] of w) stock[k] = WOOD * v / ws;
+  for (const [k, v] of n) stock[k] = NONWOOD * v / ns;
+}
 const total = Object.values(stock).reduce((a, b) => a + b, 0);
 const hhTot = m.meshes.reduce((a, x) => a + x.hh, 0);
 function run(field: 'champ' | 'e' | 'w', floors?: number) {
