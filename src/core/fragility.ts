@@ -134,6 +134,7 @@ function storyMatches(name: string, floors: number): boolean {
 
 /** 対応クラスの全壊率・全壊+半壊率それぞれの最大値（'max', 保守的な包絡）／最小値（'min'）。
  *  'rep' は repMap の代表クラスの最大（repMap なしなら 'max'）。half = max(0, 全壊+半壊 − 全壊)。
+ *  floors 未指定のとき S造・RC造の 'min' は高層クラスも含む（最小になりやすい）。
  *  floors を渡すと、その階数を含む階数区分のクラスだけを使う（'rep' で代表クラスが残らなければ、
  *  階数で絞った eraMap のクラスに戻す）。 */
 function envelope(g: FragilityGroup, e: Era | null, x: number, floors?: number, mode: CurveMode = 'max'): Rates {

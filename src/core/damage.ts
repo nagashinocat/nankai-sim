@@ -38,7 +38,7 @@ function newer(e: Era): Era {
 }
 
 /** 家の推定。幅 = 構造 × 年代（unknown は全構造・全年代, 補強済みは 1 つ新しい年代）×
- *  震度 {−0.5, 0, +0.5} × 曲線 {'min', 'max'} の最小〜最大。
+ *  震度 {−0.5, 0, +0.5} × 曲線 {'min', 'rep', 'max'} の最小〜最大（'rep' を含めるので central は必ず幅に収まる）。
  *  central = 'rep'（代表曲線）の補正なしの値。構造か年代が unknown のときは、該当する組合せの項目ごとの平均。 */
 export function estimateHome(
   cell: HazardCell,
@@ -55,7 +55,7 @@ export function estimateHome(
     for (const s of structures) {
       for (const e0 of eras) {
         const e = input.retrofitted ? newer(e0) : e0;
-        for (const mode of ['min', 'max'] as const) {
+        for (const mode of ['min', 'rep', 'max'] as const) {
           const r = ratesForCell(shifted, s, e, floors, mode);
           if (!r) return null;
           cMin = Math.min(cMin, r.collapse); cMax = Math.max(cMax, r.collapse);

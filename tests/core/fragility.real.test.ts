@@ -2,6 +2,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { validateFragilityTable, useFragilityTable, shakeRates, tsunamiRates } from '../../src/core/fragility.ts';
 import type { FragilityTable } from '../../src/core/fragility.ts';
+import { estimateHome } from '../../src/core/damage.ts';
 import real from '../../src/data/fragility.json' with { type: 'json' };
 
 const table = real as unknown as FragilityTable;
@@ -62,4 +63,20 @@ test("代表曲線: 木造 pre1981 @6.4 は 1963-71 クラス ≈59.2%", () => {
   const r = shakeRates(6.4, 'wood', 'pre1981', undefined, 'rep');
   assert.ok(Math.abs(r.collapse * 100 - 59.2) < 0.5, `${r.collapse}`);
   assert.ok(r.collapse < shakeRates(6.4, 'wood', 'pre1981').collapse);
+});
+
+test('estimateHome: 実表で central が collapse・half の幅に収まる（全構造×年代, 震度5.0-7.0）', () => {
+  const eps = 1e-12;
+  for (const structure of ['wood', 'steel', 'rc'] as const) for (const era of ['pre1981', 'y1981_2000', 'post2000'] as const) {
+    for (let k = 0; k <= 20; k++) {
+      const intensity = Math.round((5 + k * 0.1) * 10) / 10;
+      const cell = { intensity, pl: null, settlementCm: null, tsunamiDepth: null, tsunamiArrivalMin: null };
+      const r = estimateHome(cell, { structure, era, retrofitted: false })!;
+      const w = `${structure}/${era} @${intensity}`;
+      assert.ok(r.collapse[0] - eps <= r.central.collapse && r.central.collapse <= r.collapse[1] + eps, `collapse ${w}`);
+      assert.ok(r.half[0] - eps <= r.central.half && r.central.half <= r.half[1] + eps, `half ${w}`);
+    }
+  }
+  const r = estimateHome({ intensity: 6.1, pl: null, settlementCm: null, tsunamiDepth: null, tsunamiArrivalMin: null }, { structure: 'wood', era: 'pre1981', retrofitted: false })!;
+  assert.ok(r.half[0] <= r.central.half && r.central.half <= r.half[1]);
 });
