@@ -21,3 +21,7 @@ export type HomeInput = {
   era: Era | 'unknown';
   retrofitted: boolean;
 };
+
+export type StockKey = `${Structure}:${Era}`;
+/** メッシュ内の建物棟数と構造×年代の構成比。shares の合計は 1。 */
+export type BuildingStock = { total: number; shares: Partial<Record<StockKey, number>> };
