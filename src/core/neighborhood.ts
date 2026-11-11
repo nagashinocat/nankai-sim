@@ -27,7 +27,7 @@ function blendedRates(cell: HazardCell, stock: BuildingStock): { collapse: numbe
   for (const [key, share] of Object.entries(stock.shares)) {
     if (!share) continue;
     const [s, e] = key.split(':') as [Structure, Era];
-    const r = ratesForCell(cell, s, e);
+    const r = ratesForCell(cell, s, e, undefined, 'rep');
     if (!r) return null;
     collapse += share * r.collapse;
     half += share * r.half;

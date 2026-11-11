@@ -90,7 +90,7 @@ export function computeMunicipality(hazardCase: string, meshes: string[], hazard
     const ia = hz[0]!;
     for (const [key, share] of Object.entries(st.shares)) {
       const [s, e] = key.split(':') as [Structure, Era];
-      sum += st.total * share * shakeRates(ia, s, e).collapse;
+      sum += st.total * share * shakeRates(ia, s, e, undefined, 'rep').collapse;
     }
   }
   return { sum, skipped };

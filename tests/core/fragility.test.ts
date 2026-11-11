@@ -156,3 +156,54 @@ test('非有限の入力は RangeError（0 被害にしない）', () => {
 });
 
 // 実データの抜き取り確認は tests/core/fragility.real.test.ts に移動
+
+test('mode: min <= rep <= max（木造 pre1981・RC pre1981 階数なし）', () => {
+  useFragilityTable(table);
+  for (const [st, e] of [['wood', 'pre1981'], ['rc', 'pre1981']] as const) {
+    for (const i of [4.8, 5.3, 5.8, 6.2, 6.6, 7.0]) {
+      const lo = shakeRates(i, st, e, undefined, 'min');
+      const rep = shakeRates(i, st, e, undefined, 'rep');
+      const hi = shakeRates(i, st, e, undefined, 'max');
+      assert.ok(lo.collapse <= rep.collapse + 1e-12 && rep.collapse <= hi.collapse + 1e-12, `${st} @${i}`);
+      assert.ok(lo.collapse + lo.half <= rep.collapse + rep.half + 1e-12, `${st} total @${i}`);
+      assert.ok(rep.collapse + rep.half <= hi.collapse + hi.half + 1e-12, `${st} total @${i}`);
+    }
+  }
+  assert.deepEqual(shakeRates(6, 'wood', 'pre1981'), shakeRates(6, 'wood', 'pre1981', undefined, 'max'));
+});
+
+test("mode 'rep': 木造 pre1981 は 1963-71 クラスの値", () => {
+  useFragilityTable(table);
+  const cls = table.shake.groups.wood!.classes['1963-71']!;
+  const pt = cls.find(([x]) => x === 5.5)!;
+  const r = shakeRates(5.5, 'wood', 'pre1981', undefined, 'rep');
+  assert.ok(Math.abs(r.collapse - pt[1]) < 1e-12);
+  assert.ok(Math.abs(r.half - (pt[2] - pt[1])) < 1e-12);
+});
+
+test("mode 'min': 木造 pre1981 は 3 クラスの最小", () => {
+  useFragilityTable(table);
+  const at = (c: string) => table.shake.groups.wood!.classes[c]!.find(([x]) => x === 5.5)![1];
+  assert.ok(Math.abs(shakeRates(5.5, 'wood', 'pre1981', undefined, 'min').collapse - Math.min(at('≤1962'), at('1963-71'), at('1972-80'))) < 1e-12);
+});
+
+test("mode 'rep': 階数で代表クラスが残らなければ階数で絞った eraMap に戻す（RC pre1981, 12階）", () => {
+  useFragilityTable(table);
+  assert.deepEqual(shakeRates(6.5, 'rc', 'pre1981', 12, 'rep'), shakeRates(6.5, 'rc', 'pre1981', 12, 'max'));
+});
+
+test("repMap のない液状化・津波では 'rep' は 'max' と同じ。'min' <= 'max'", () => {
+  useFragilityTable(table);
+  assert.deepEqual(liquefactionRates(15, 'wood', 'pre1981', 'rep'), liquefactionRates(15, 'wood', 'pre1981'));
+  assert.deepEqual(tsunamiRates(3, 'rc', 'rep'), tsunamiRates(3, 'rc'));
+  assert.ok(tsunamiRates(3, 'rc', 'min').collapse <= tsunamiRates(3, 'rc').collapse);
+});
+
+test('validator: repMap のクラスが classes にない／eraMap にない', () => {
+  const t = clone();
+  t.shake.groups.wood!.repMap = { pre1981: ['nope'], y1981_2000: ['1981-89'], post2000: ['2002-'] };
+  assert.ok(validateFragilityTable(t).some((m) => m.includes('repMap') && m.includes('nope')));
+  const t2 = clone();
+  t2.shake.groups.wood!.repMap = { pre1981: ['2002-'], y1981_2000: ['1981-89'], post2000: ['2002-'] };
+  assert.ok(validateFragilityTable(t2).some((m) => m.includes('repMap.pre1981')));
+});

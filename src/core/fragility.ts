@@ -9,7 +9,12 @@ export type FragilityGroup = {
   classes: Record<string, Curve>;
   /** 本アプリの 3 年代 → 出典クラス名。省略時は全クラスが全年代に対応（津波など）。 */
   eraMap?: Record<Era, string[]>;
+  /** 代表的な曲線: 本アプリの 3 年代 → 出典クラス名（eraMap[e] の部分集合）。地域の合計（mode 'rep'）に使う。省略時は 'rep' を 'max' と同じに扱う。 */
+  repMap?: Record<Era, string[]>;
 };
+
+/** 曲線の選び方。'max' = 対応クラスの最大（保守的）、'min' = 最小、'rep' = repMap の代表クラス。 */
+export type CurveMode = 'max' | 'min' | 'rep';
 
 export type FragilityFamily<G extends string> = {
   source: string;
@@ -62,6 +67,16 @@ export function validateFragilityTable(t: FragilityTable): string[] {
           const ks = g.eraMap[e];
           if (!ks || ks.length === 0) errs.push(`${where}.eraMap.${e}: クラスがありません`);
           else for (const k of ks) if (!(k in g.classes)) errs.push(`${where}.eraMap.${e}: 存在しないクラス ${k}`);
+        }
+      }
+      if (g.repMap) {
+        for (const e of ERAS) {
+          const ks = g.repMap[e];
+          if (!ks || ks.length === 0) { errs.push(`${where}.repMap.${e}: クラスがありません`); continue; }
+          for (const k of ks) {
+            if (!(k in g.classes)) errs.push(`${where}.repMap.${e}: 存在しないクラス ${k}`);
+            else if (g.eraMap && !(g.eraMap[e] ?? []).includes(k)) errs.push(`${where}.repMap.${e}: eraMap.${e} に含まれないクラス ${k}`);
+          }
         }
       }
     }
@@ -117,17 +132,26 @@ function storyMatches(name: string, floors: number): boolean {
   return !m || (floors >= Number(m[1]) && floors <= Number(m[2]));
 }
 
-/** 対応クラスの全壊率・全壊+半壊率それぞれの最大値（保守的な包絡）。half = 全壊+半壊 − 全壊。
- *  floors を渡すと、その階数を含む階数区分のクラスだけを使う。 */
-function envelope(g: FragilityGroup, e: Era | null, x: number, floors?: number): Rates {
-  let names = e && g.eraMap ? g.eraMap[e] : Object.keys(g.classes);
-  if (floors !== undefined) names = names.filter((n) => storyMatches(n, floors));
-  let collapse = 0;
-  let total = 0;
+/** 対応クラスの全壊率・全壊+半壊率それぞれの最大値（'max', 保守的な包絡）／最小値（'min'）。
+ *  'rep' は repMap の代表クラスの最大（repMap なしなら 'max'）。half = max(0, 全壊+半壊 − 全壊)。
+ *  floors を渡すと、その階数を含む階数区分のクラスだけを使う（'rep' で代表クラスが残らなければ、
+ *  階数で絞った eraMap のクラスに戻す）。 */
+function envelope(g: FragilityGroup, e: Era | null, x: number, floors?: number, mode: CurveMode = 'max'): Rates {
+  const all = e && g.eraMap ? g.eraMap[e] : Object.keys(g.classes);
+  const byFloors = (ns: string[]) => (floors !== undefined ? ns.filter((n) => storyMatches(n, floors)) : ns);
+  let names = byFloors(all);
+  if (mode === 'rep' && e && g.repMap) {
+    const rep = byFloors(g.repMap[e]);
+    if (rep.length > 0) names = rep;
+  }
+  if (names.length === 0) return { collapse: 0, half: 0 };
+  const useMin = mode === 'min';
+  let collapse = useMin ? Infinity : 0;
+  let total = useMin ? Infinity : 0;
   for (const n of names) {
     const [c, t] = interpolate(g.classes[n]!, x);
-    if (c > collapse) collapse = c;
-    if (t > total) total = t;
+    if (useMin ? c < collapse : c > collapse) collapse = c;
+    if (useMin ? t < total : t > total) total = t;
   }
   return { collapse, half: Math.max(0, total - collapse) };
 }
@@ -142,7 +166,7 @@ const nonwood = (s: Structure): 'wood' | 'nonwood' => (s === 'wood' ? 'wood' : '
 
 /** 揺れ。intensity は計測震度。floors（地上階数, 1 以上の整数）は S造・RC造でのみ使い、
  *  省略時は全階数区分の包絡。16 階以上の S造・RC造は被害なし。 */
-export function shakeRates(intensity: number, s: Structure, e: Era, floors?: number): Rates {
+export function shakeRates(intensity: number, s: Structure, e: Era, floors?: number, mode: CurveMode = 'max'): Rates {
   if (floors !== undefined && !(Number.isInteger(floors) && floors >= 1)) {
     throw new RangeError(`階数は 1 以上の整数で指定してください: ${floors}`);
   }
@@ -151,17 +175,17 @@ export function shakeRates(intensity: number, s: Structure, e: Era, floors?: num
     if (!Number.isFinite(intensity)) throw new RangeError(`被害関数の入力が有限の数ではありません: ${intensity}`);
     return { collapse: 0, half: 0 };
   }
-  return envelope(group(t.shake, s, 'shake'), e, intensity, s === 'wood' ? undefined : floors);
+  return envelope(group(t.shake, s, 'shake'), e, intensity, s === 'wood' ? undefined : floors, mode);
 }
 
 /** 液状化。settlementCm は液状化による地盤沈下量(cm)。steel/rc は非木造の曲線を使う。 */
-export function liquefactionRates(settlementCm: number, s: Structure, e: Era): Rates {
+export function liquefactionRates(settlementCm: number, s: Structure, e: Era, mode: CurveMode = 'max'): Rates {
   const t = table();
-  return envelope(group(t.liquefaction, nonwood(s), 'liquefaction'), e, settlementCm);
+  return envelope(group(t.liquefaction, nonwood(s), 'liquefaction'), e, settlementCm, undefined, mode);
 }
 
 /** 津波。depthM は浸水深(m)。人口集中地区／それ以外の最大値。steel/rc は非木造の曲線を使う。 */
-export function tsunamiRates(depthM: number, s: Structure): Rates {
+export function tsunamiRates(depthM: number, s: Structure, mode: CurveMode = 'max'): Rates {
   const t = table();
-  return envelope(group(t.tsunami, nonwood(s), 'tsunami'), null, depthM);
+  return envelope(group(t.tsunami, nonwood(s), 'tsunami'), null, depthM, undefined, mode);
 }

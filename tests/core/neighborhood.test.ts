@@ -15,7 +15,7 @@ const wood100: BuildingStock = { total: 100, shares: { 'wood:pre1981': 1 } };
 before(() => useFragilityTable(fixture as unknown as FragilityTable));
 
 test('建物100棟・全部 wood:pre1981 なら 100 × 全壊率', () => {
-  const r = ratesForCell(cell(), 'wood', 'pre1981')!;
+  const r = ratesForCell(cell(), 'wood', 'pre1981', undefined, 'rep')!;
   const out = estimateArea({ a: cell() }, { a: wood100 }, ['a']);
   close(out.collapse, 100 * r.collapse);
   close(out.half, 100 * r.half);
@@ -26,7 +26,7 @@ test('建物100棟・全部 wood:pre1981 なら 100 × 全壊率', () => {
 test('cells か stock にないメッシュは数えず countedMeshes にも入れない', () => {
   const out = estimateArea({ a: cell(), c: cell() }, { a: wood100, b: wood100 }, ['a', 'b', 'c', 'd']);
   assert.equal(out.countedMeshes, 1);
-  const r = ratesForCell(cell(), 'wood', 'pre1981')!;
+  const r = ratesForCell(cell(), 'wood', 'pre1981', undefined, 'rep')!;
   close(out.collapse, 100 * r.collapse);
 });
 
@@ -38,8 +38,8 @@ test('intensity が null のマスは数えず、meshCollapseRate は null', () 
 
 test('構成比で按分する', () => {
   const s: BuildingStock = { total: 200, shares: { 'wood:pre1981': 0.5, 'rc:post2000': 0.5 } };
-  const a = ratesForCell(cell(), 'wood', 'pre1981')!;
-  const b = ratesForCell(cell(), 'rc', 'post2000')!;
+  const a = ratesForCell(cell(), 'wood', 'pre1981', undefined, 'rep')!;
+  const b = ratesForCell(cell(), 'rc', 'post2000', undefined, 'rep')!;
   close(meshCollapseRate(cell(), s)!, 0.5 * a.collapse + 0.5 * b.collapse);
   close(estimateArea({ a: cell() }, { a: s }, ['a']).collapse, 200 * (0.5 * a.collapse + 0.5 * b.collapse));
 });

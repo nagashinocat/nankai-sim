@@ -57,3 +57,9 @@ test('不正な階数は RangeError', () => {
     assert.throws(() => shakeRates(6.0, 'rc', 'pre1981', f), RangeError);
   }
 });
+
+test("代表曲線: 木造 pre1981 @6.4 は 1963-71 クラス ≈59.2%", () => {
+  const r = shakeRates(6.4, 'wood', 'pre1981', undefined, 'rep');
+  assert.ok(Math.abs(r.collapse * 100 - 59.2) < 0.5, `${r.collapse}`);
+  assert.ok(r.collapse < shakeRates(6.4, 'wood', 'pre1981').collapse);
+});

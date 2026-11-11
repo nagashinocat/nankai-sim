@@ -56,14 +56,16 @@ test('幅は ±0.5 を含む: min <= 中央値 <= max', () => {
   useFragilityTable(fixture as unknown as FragilityTable);
   for (const s of structures) for (const e of eras) {
     const c = cell({ intensity: 5.7, settlementCm: 10 });
-    const mid = ratesForCell(c, s, e)!;
+    const mid = ratesForCell(c, s, e, undefined, 'rep')!;
     const r = estimateHome(c, { structure: s, era: e, retrofitted: false })!;
     assert.ok(r.collapse[0] <= mid.collapse && mid.collapse <= r.collapse[1]);
     assert.ok(r.half[0] <= mid.half + 1e-12 && mid.half <= r.half[1] + 1e-12);
-    const lo = ratesForCell(cell({ intensity: 5.2, settlementCm: 10 }), s, e)!;
-    const hi = ratesForCell(cell({ intensity: 6.2, settlementCm: 10 }), s, e)!;
-    assert.ok(r.collapse[0] <= Math.min(lo.collapse, hi.collapse) + 1e-12);
-    assert.ok(r.collapse[1] >= Math.max(lo.collapse, hi.collapse) - 1e-12);
+    const lo = ratesForCell(cell({ intensity: 5.2, settlementCm: 10 }), s, e, undefined, 'min')!;
+    const hi = ratesForCell(cell({ intensity: 6.2, settlementCm: 10 }), s, e, undefined, 'max')!;
+    assert.ok(r.collapse[0] <= lo.collapse + 1e-12);
+    assert.ok(r.collapse[1] >= hi.collapse - 1e-12);
+    assert.ok(r.collapse[0] <= r.central.collapse && r.central.collapse <= r.collapse[1]);
+    close(r.central.collapse, mid.collapse);
   }
 });
 
@@ -105,7 +107,7 @@ test('時間差の全壊率 >= 後発単独の全壊率', () => {
     const first = cell({ intensity: 5.5 });
     const second = cell({ intensity: 6 });
     const lag = estimateLag(first, second, s, e)!;
-    const alone = ratesForCell(second, s, e)!;
+    const alone = ratesForCell(second, s, e, undefined, 'rep')!;
     assert.ok(lag.collapse >= alone.collapse - 1e-12, `${s}/${e}`);
     assert.ok(lag.collapse + lag.half <= 1 + 1e-12);
     assert.ok(lag.half >= -1e-12);
@@ -116,7 +118,7 @@ test('時間差で先発の被害がゼロなら後発単独と同じ', () => {
   useFragilityTable(fixture as unknown as FragilityTable);
   for (const s of structures) for (const e of eras) {
     const lag = estimateLag(cell({ intensity: 3 }), cell({ intensity: 6 }), s, e)!;
-    const alone = ratesForCell(cell({ intensity: 6 }), s, e)!;
+    const alone = ratesForCell(cell({ intensity: 6 }), s, e, undefined, 'rep')!;
     close(lag.collapse, alone.collapse);
     close(lag.half, alone.half);
   }
@@ -148,11 +150,11 @@ test('時間差は国の手法: 先発で半壊した分は、後発の計測震
   const first: HazardCell = { intensity: 6.0, pl: null, settlementCm: null, tsunamiDepth: null, tsunamiArrivalMin: null };
   const second: HazardCell = { ...first, intensity: 5.5 };
   for (const e of ['pre1981', 'y1981_2000', 'post2000'] as const) {
-    const f = ratesForCell(first, 'wood', e)!;
-    const ri = ratesForCell(second, 'wood', e)!;
-    const rd = ratesForCell({ ...second, intensity: 6.0 }, 'wood', e)!;
+    const f = ratesForCell(first, 'wood', e, undefined, 'rep')!;
+    const ri = ratesForCell(second, 'wood', e, undefined, 'rep')!;
+    const rd = ratesForCell({ ...second, intensity: 6.0 }, 'wood', e, undefined, 'rep')!;
     const u = 1 - f.collapse - f.half;
-    const r = estimateLag(first, second, 'wood', e)!;
+    const r = estimateLag(first, second, 'wood', e, undefined, 'rep')!;
     assert.ok(Math.abs(r.collapse - (f.collapse + u * ri.collapse + f.half * rd.collapse)) < 1e-12, e);
     assert.ok(Math.abs(r.half - (u * ri.half + f.half * (1 - rd.collapse))) < 1e-12, e);
   }
@@ -163,9 +165,34 @@ test('estimateHome は階数を渡す（RC, 階数3 と 階数12 で結果が違
   const cell: HazardCell = { intensity: 6.5, pl: null, settlementCm: null, tsunamiDepth: null, tsunamiArrivalMin: null };
   const lo = estimateHome(cell, { structure: 'rc', era: 'pre1981', retrofitted: false, floors: 3 })!;
   const hi = estimateHome(cell, { structure: 'rc', era: 'pre1981', retrofitted: false, floors: 12 })!;
-  const c3 = ratesForCell(cell, 'rc', 'pre1981', 3)!.collapse;
-  const c12 = ratesForCell(cell, 'rc', 'pre1981', 12)!.collapse;
+  const c3 = ratesForCell(cell, 'rc', 'pre1981', 3, 'rep')!.collapse;
+  const c12 = ratesForCell(cell, 'rc', 'pre1981', 12, 'rep')!.collapse;
   assert.ok(lo.collapse[0] <= c3 && c3 <= lo.collapse[1]);
   assert.ok(hi.collapse[0] <= c12 && c12 <= hi.collapse[1]);
   assert.ok(JSON.stringify(lo) !== JSON.stringify(hi));
+});
+
+test('estimateHome: collapse[0] <= central <= collapse[1]、unknown の central は組合せの平均', () => {
+  const c = cell({ intensity: 6.2 });
+  const w = estimateHome(c, { structure: 'wood', era: 'pre1981', retrofitted: false })!;
+  assert.ok(w.collapse[0] <= w.central.collapse && w.central.collapse <= w.collapse[1]);
+  close(w.central.collapse, shakeRates(6.2, 'wood', 'pre1981', undefined, 'rep').collapse);
+  const u = estimateHome(c, { structure: 'unknown', era: 'unknown', retrofitted: false })!;
+  let sum = 0;
+  for (const s of structures) for (const e of eras) sum += ratesForCell(c, s, e, undefined, 'rep')!.collapse;
+  close(u.central.collapse, sum / 9);
+});
+
+test('estimateHome: 木造 pre1981 の下限は 1972-80 クラス側（以前の包絡のみの幅より広い）', () => {
+  const c = cell({ intensity: 6 });
+  const r = estimateHome(c, { structure: 'wood', era: 'pre1981', retrofitted: false })!;
+  const old = [-0.5, 0, 0.5].map((d) => shakeRates(6 + d, 'wood', 'pre1981').collapse);
+  assert.ok(r.collapse[0] < Math.min(...old) - 1e-6);
+  close(r.collapse[1], Math.max(...old));
+  close(r.collapse[0], shakeRates(5.5, 'wood', 'pre1981', undefined, 'min').collapse);
+});
+
+test('estimateLag の既定は rep', () => {
+  const a = cell({ intensity: 6 }), b = cell({ intensity: 5.5 });
+  assert.deepEqual(estimateLag(a, b, 'wood', 'pre1981'), estimateLag(a, b, 'wood', 'pre1981', undefined, 'rep'));
 });

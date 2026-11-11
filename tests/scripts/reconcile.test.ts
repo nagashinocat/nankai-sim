@@ -90,9 +90,9 @@ test('computeMunicipality: Σ total×share×collapse(Ia) と欠落メッシュ�
     return files[p];
   };
   const expected =
-    100 * 0.6 * shakeRates(6.0, 'wood', 'pre1981').collapse +
-    100 * 0.4 * shakeRates(6.0, 'rc', 'post2000').collapse +
-    50 * 1 * shakeRates(5.0, 'wood', 'y1981_2000').collapse;
+    100 * 0.6 * shakeRates(6.0, 'wood', 'pre1981', undefined, 'rep').collapse +
+    100 * 0.4 * shakeRates(6.0, 'rc', 'post2000', undefined, 'rep').collapse +
+    50 * 1 * shakeRates(5.0, 'wood', 'y1981_2000', undefined, 'rep').collapse;
   assert.ok(expected > 0);
   const r = computeMunicipality('L2_RIKU', ['5236442023', '5236442024'], new Map(), new Map(), reader);
   assert.ok(Math.abs(r.sum - expected) < 1e-9);
