@@ -93,6 +93,7 @@ function table(): FragilityTable {
 
 /** 端は固定、間は線形補間。戻り値は [全壊率, 全壊+半壊率]。 */
 function interpolate(curve: Curve, x: number): [number, number] {
+  if (!Number.isFinite(x)) throw new RangeError(`被害関数の入力が有限の数ではありません: ${x}`);
   const first = curve[0]!;
   const last = curve[curve.length - 1]!;
   if (x <= first[0]) return [first[1], first[2]];

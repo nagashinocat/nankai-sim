@@ -146,4 +146,13 @@ test('失敗した useFragilityTable は直前の登録を壊さない', () => {
   assert.deepEqual(shakeRates(6.5, 'wood', 'pre1981'), before);
 });
 
+test('非有限の入力は RangeError（0 被害にしない）', () => {
+  useFragilityTable(table);
+  for (const x of [NaN, Infinity, -Infinity]) {
+    assert.throws(() => shakeRates(x, 'wood', 'pre1981'), RangeError);
+    assert.throws(() => liquefactionRates(x, 'wood', 'pre1981'), RangeError);
+    assert.throws(() => tsunamiRates(x, 'wood'), RangeError);
+  }
+});
+
 test.todo('転記の抜き取り確認: 資料の代表点 3 点と一致（実データ転記後に追加。docs/fragility-data-todo.md 参照）');

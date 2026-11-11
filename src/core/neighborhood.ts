@@ -3,9 +3,19 @@ import type { BuildingStock, Era, HazardCell, Structure, StockKey } from './type
 
 export type { BuildingStock, StockKey } from './types.ts';
 
+const STRUCTURE_KEYS = ['wood', 'steel', 'rc'];
+const ERA_KEYS = ['pre1981', 'y1981_2000', 'post2000'];
+const VALID_KEYS = new Set(STRUCTURE_KEYS.flatMap((s) => ERA_KEYS.map((e) => `${s}:${e}`)));
+
 function checkShares(stock: BuildingStock): void {
+  if (!Number.isFinite(stock.total) || stock.total < 0) throw new Error(`total が不正です: ${stock.total}`);
   let sum = 0;
-  for (const v of Object.values(stock.shares)) sum += v ?? 0;
+  for (const [key, v] of Object.entries(stock.shares)) {
+    if (!VALID_KEYS.has(key)) throw new Error(`未知の構造×年代キーです: ${key}`);
+    if (v === undefined) continue;
+    if (!Number.isFinite(v) || v < 0) throw new Error(`shares[${key}] は 0 以上の有限値が必要です: ${v}`);
+    sum += v;
+  }
   if (!(Math.abs(sum - 1) < 0.01)) throw new Error(`shares の合計が 1 ではありません: ${sum}`);
 }
 

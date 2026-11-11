@@ -127,3 +127,18 @@ test('時間差: どちらかの intensity が null なら null', () => {
   assert.equal(estimateLag(cell({ intensity: null }), cell(), 'wood', 'pre1981'), null);
   assert.equal(estimateLag(cell(), cell({ intensity: null }), 'wood', 'pre1981'), null);
 });
+
+test('沈下量・浸水深が非有限なら null（null は従来どおり対象外）', () => {
+  const input = { structure: 'wood', era: 'pre1981', retrofitted: false } as const;
+  for (const bad of [NaN, Infinity, -Infinity]) {
+    assert.equal(ratesForCell(cell({ tsunamiDepth: bad }), 'wood', 'pre1981'), null);
+    assert.equal(ratesForCell(cell({ settlementCm: bad }), 'wood', 'pre1981'), null);
+    assert.equal(estimateHome(cell({ tsunamiDepth: bad }), input), null);
+    assert.equal(estimateLag(cell(), cell({ tsunamiDepth: bad }), 'wood', 'pre1981'), null);
+  }
+  assert.deepEqual(
+    ratesForCell(cell({ tsunamiDepth: null, settlementCm: null }), 'wood', 'pre1981'),
+    ratesForCell(cell(), 'wood', 'pre1981'),
+  );
+  assert.notEqual(estimateHome(cell({ tsunamiDepth: null }), input), null);
+});

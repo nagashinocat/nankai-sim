@@ -56,3 +56,10 @@ for (const [walk, arr, want] of [
     assert.equal(reachBeforeTsunami(walk, arr), want);
   });
 }
+
+test('距離が非有限（座標 NaN）の施設は除外し、並びを乱さない', () => {
+  const nan = sh('nan', 0, { pos: { lat: NaN, lon: origin.lon } });
+  const o2 = { ...opts, limit: 2 };
+  assert.deepEqual(nearestShelters(origin, [sh('far', 0.01), nan, sh('near', 0.001)], o2).map((h) => h.shelter.id), ['near', 'far']);
+  assert.deepEqual(nearestShelters(origin, [nan, sh('far', 0.01), sh('near', 0.001)], o2).map((h) => h.shelter.id), ['near', 'far']);
+});

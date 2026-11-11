@@ -51,3 +51,19 @@ test('shares の合計が 1 から 0.01 以上ずれていたら例外', () => {
   const ok: BuildingStock = { total: 100, shares: { 'wood:pre1981': 0.995 } };
   assert.ok(meshCollapseRate(cell(), ok) !== null);
 });
+
+test('BuildingStock の不正値は Error（FragilityDataMissingError ではない）', () => {
+  const c = cell();
+  const bad = (stock: BuildingStock) => assert.throws(
+    () => meshCollapseRate(c, stock),
+    (e: unknown) => e instanceof Error && e.name !== 'FragilityDataMissingError',
+  );
+  bad({ total: 10, shares: { 'wood:pre1981': 1.5, 'rc:post2000': -0.5 } });
+  bad({ total: NaN, shares: { 'wood:pre1981': 1 } });
+  bad({ total: -1, shares: { 'wood:pre1981': 1 } });
+  bad({ total: Infinity, shares: { 'wood:pre1981': 1 } });
+  bad({ total: 10, shares: { 'wood:unknown': 1 } as never });
+  bad({ total: 10, shares: { 'brick:pre1981': 1 } as never });
+  bad({ total: 10, shares: { 'wood:pre1981': NaN } });
+  assert.throws(() => estimateArea({ a: c }, { a: { total: NaN, shares: { 'wood:pre1981': 1 } } }, ['a']), Error);
+});

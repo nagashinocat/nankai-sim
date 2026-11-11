@@ -19,16 +19,15 @@ export function combine(list: Rates[]): Rates {
   return { collapse, half: total - collapse };
 }
 
-/** 揺れ → 液状化 → 津波の順に合成。沈下量・浸水深が null／非有限の要因は飛ばす。intensity が無効なら null。 */
+/** 揺れ → 液状化 → 津波の順に合成。沈下量・浸水深が null の要因は飛ばす。intensity・沈下量・浸水深が非有限なら null。 */
 export function ratesForCell(cell: HazardCell, s: Structure, e: Era): Rates | null {
   if (cell.intensity === null || !Number.isFinite(cell.intensity)) return null;
+  // null = 対象外。値があるのに非有限ならデータ不正なので null（無被害にしない）。
+  if (cell.settlementCm !== null && !Number.isFinite(cell.settlementCm)) return null;
+  if (cell.tsunamiDepth !== null && !Number.isFinite(cell.tsunamiDepth)) return null;
   const parts: Rates[] = [shakeRates(cell.intensity, s, e)];
-  if (cell.settlementCm !== null && Number.isFinite(cell.settlementCm)) {
-    parts.push(liquefactionRates(cell.settlementCm, s, e));
-  }
-  if (cell.tsunamiDepth !== null && Number.isFinite(cell.tsunamiDepth)) {
-    parts.push(tsunamiRates(cell.tsunamiDepth, s));
-  }
+  if (cell.settlementCm !== null) parts.push(liquefactionRates(cell.settlementCm, s, e));
+  if (cell.tsunamiDepth !== null) parts.push(tsunamiRates(cell.tsunamiDepth, s));
   return combine(parts);
 }
 

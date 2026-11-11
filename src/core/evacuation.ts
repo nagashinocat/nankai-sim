@@ -21,6 +21,7 @@ export function nearestShelters(
       const d = distanceM(origin, shelter.pos);
       return { shelter, distanceM: d, walkMin: (d * DETOUR_FACTOR) / opts.speedMps / 60 };
     })
+    .filter((h) => Number.isFinite(h.distanceM))
     .sort((a, b) => a.distanceM - b.distanceM) // Array.prototype.sort は安定
     .slice(0, opts.limit);
 }
