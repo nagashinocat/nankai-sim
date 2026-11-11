@@ -17,3 +17,17 @@ declare module 'node:assert/strict' {
   };
   export default assert;
 }
+declare module 'node:fs' {
+  export function readFileSync(path: string, encoding: 'utf8'): string;
+  export function writeFileSync(path: string, data: string): void;
+  export function mkdirSync(path: string, options?: { recursive?: boolean }): void;
+  export function existsSync(path: string): boolean;
+}
+declare module 'node:url' {
+  export function fileURLToPath(url: string | URL): string;
+}
+declare module 'node:path' {
+  export function dirname(p: string): string;
+  export function resolve(...parts: string[]): string;
+}
+declare const process: { argv: string[] };
