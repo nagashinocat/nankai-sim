@@ -169,3 +169,15 @@ test('v3: 津波 nearby（Ruling F3）は band と同じ形なら読み込み、
     assert.equal(loadLast(s), null, JSON.stringify(t));
   }
 });
+
+test('v3: 到達時間の注意（arrivalCaveat, Ruling W-d）は文字列なら読み込み、無くても読める（以前の保存）、文字列でなければ読まない', () => {
+  const s = memStore();
+  const home = saved.home as Record<string, unknown>;
+  const t = { kind: 'band', depth: '1〜3m', arrival: '海岸への到達 最短約12分（1m）', urgent: false };
+  s.setItem(LAST_KEY, JSON.stringify({ ...saved, home: { ...home, tsunami: { ...t, arrivalCaveat: 'この時間は1mの津波が着く時間です。それより低い津波はもっと早く着くことがあります' } } }));
+  assert.notEqual(loadLast(s), null);
+  s.setItem(LAST_KEY, JSON.stringify({ ...saved, home: { ...home, tsunami: t } }));
+  assert.notEqual(loadLast(s), null);
+  s.setItem(LAST_KEY, JSON.stringify({ ...saved, home: { ...home, tsunami: { ...t, arrivalCaveat: 1 } } }));
+  assert.equal(loadLast(s), null);
+});

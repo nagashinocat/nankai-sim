@@ -343,3 +343,56 @@ test('homeTsunamiLines（F3）: nearby は強い一文＋「すぐ近く（約50
     STRONG, 'すぐ近く（約50m以内）まで浸水が想定されています（最大 0.5〜1m）', '揺れが収まったらすぐ高い所へ',
   ]);
 });
+
+// --- 和歌山県は +1m の到達時間（Ruling W-b）: 100cm 以上は m で表示 ---
+import { arrivalHeightText } from '../../src/app/viewmodel.ts';
+
+test('arrivalHeightText: 100cm 未満は「{cm}cm」、100cm 以上は「{cm/100}m」', () => {
+  assert.equal(arrivalHeightText(30), '30cm');
+  assert.equal(arrivalHeightText(50), '50cm');
+  assert.equal(arrivalHeightText(99), '99cm');
+  assert.equal(arrivalHeightText(100), '1m');
+  assert.equal(arrivalHeightText(300), '3m');
+  assert.equal(arrivalHeightText(150), '1.5m');
+});
+
+test('homeViewModel 津波・reachHintText: 和歌山（cm=100）は「（1m）」', () => {
+  const a = homeViewModel(cell(), home(), band('1〜3m'), { min: 12, cm: 100 });
+  assert.ok(a.status === 'ok' && a.tsunami.kind === 'band');
+  assert.equal(a.tsunami.arrival, '海岸への到達 最短約12分（1m）');
+  assert.equal(a.tsunami.urgent, false);
+  const b = homeViewModel(cell(), home(), band('1〜3m'), { min: 1, cm: 100 });
+  assert.ok(b.status === 'ok' && b.tsunami.kind === 'band');
+  assert.equal(b.tsunami.arrival, '海岸への到達 最短約1分（1m）');
+  assert.equal(b.tsunami.urgent, true);
+  assert.match(reachHintText(100), /到達時間（1m）と比べた目安/);
+  assert.doesNotMatch(reachHintText(100), /100cm/);
+});
+
+// --- Ruling W-d: 到達時間の高さが 30cm より高い（静岡 50cm・和歌山 1m）ときは、到達の行の下に注意を添える ---
+import { arrivalCaveatText } from '../../src/app/viewmodel.ts';
+
+const CAVEAT_50 = 'この時間は50cmの津波が着く時間です。それより低い津波はもっと早く着くことがあります';
+const CAVEAT_1M = 'この時間は1mの津波が着く時間です。それより低い津波はもっと早く着くことがあります';
+
+test('arrivalCaveatText: 30cm 以下は null、50cm・1m は高さの表記つきの注意', () => {
+  assert.equal(arrivalCaveatText(30), null);
+  assert.equal(arrivalCaveatText(50), CAVEAT_50);
+  assert.equal(arrivalCaveatText(100), CAVEAT_1M);
+});
+
+test('homeTsunamiLines（W-d）: 和歌山（1m）・静岡（50cm）は到達の行のすぐ下に注意。三重（30cm）・到達時間なしは出さない', () => {
+  assert.deepEqual(texts(homeViewModel(cell(), home(), band('1〜3m'), { min: 12, cm: 100 })), [
+    STRONG, '津波 浸水深 1〜3m（想定）・海岸への到達 最短約12分（1m）', CAVEAT_1M, ARRIVAL_NOTE,
+  ]);
+  assert.deepEqual(texts(homeViewModel(cell(), home(), { nearby: band('1〜3m') }, { min: 24, cm: 50 })), [
+    STRONG, 'すぐ近く（約50m以内）まで浸水が想定されています（最大 1〜3m）', '海岸への到達 最短約24分（50cm）', CAVEAT_50, ARRIVAL_NOTE,
+  ]);
+  assert.deepEqual(texts(homeViewModel(cell(), home(), band('1〜3m'), { min: 1, cm: 100 })), [
+    STRONG, '津波 浸水深 1〜3m（想定）・海岸への到達 最短約1分（1m）', CAVEAT_1M, ARRIVAL_NOTE, '揺れが収まったらすぐ高い所へ',
+  ]);
+  for (const t of texts(homeViewModel(cell(), home(), band('1〜3m'), { min: 12, cm: 30 }))) assert.doesNotMatch(t, /それより低い津波/);
+  for (const t of texts(homeViewModel(cell(), home(), band('1〜3m'), { min: null, cm: 100 }))) assert.doesNotMatch(t, /それより低い津波/);
+  const lines = homeTsunamiLines({ kind: 'band', depth: '1〜3m', arrival: '海岸への到達 最短約12分（1m）', arrivalCaveat: CAVEAT_1M, urgent: false });
+  assert.equal(lines.find((l) => l.text === CAVEAT_1M)?.cls, 'note tsunami-caveat');
+});

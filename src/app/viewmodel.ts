@@ -13,7 +13,9 @@ export type RangeVM = { min: string; max: string; central: string };
  * none = 想定の浸水域外、unknown = 判定できない（津波は含めない）。保存してよい文字列だけ。
  */
 export type TsunamiVM =
-  | { kind: 'band' | 'nearby'; depth: string; arrival: string | null; urgent: boolean }
+  | { kind: 'band' | 'nearby'; depth: string; arrival: string | null; urgent: boolean;
+      /** 到達時間の高さが 30cm より高いときの注意（Ruling W-d）。無ければ省く（以前の保存にも無い） */
+      arrivalCaveat?: string }
   | { kind: 'none' }
   | { kind: 'unknown' };
 export type HomeVM =
@@ -32,9 +34,19 @@ export type EvacVM = {
   arrivalCm: number | null;
 };
 
+/** 到達時間の高さの表記。100cm 未満は「30cm」、100cm 以上は「1m」（和歌山県は +1m。Ruling W-b）。 */
+export function arrivalHeightText(cm: number): string {
+  return cm >= 100 ? `${cm / 100}m` : `${cm}cm`;
+}
+
+/** 到達時間の高さが 30cm より高い（静岡 50cm・和歌山 1m）ときに到達の行の下に添える注意（Ruling W-d）。30cm 以下は null。 */
+export function arrivalCaveatText(cm: number): string | null {
+  return cm > 30 ? `この時間は${arrivalHeightText(cm)}の津波が着く時間です。それより低い津波はもっと早く着くことがあります` : null;
+}
+
 /** 津波の避難場所リストの下の説明。高さ（cm）は到達時間のデータから。不明なら高さを書かない。 */
 export function reachHintText(cm: number | null | undefined): string {
-  const height = typeof cm === 'number' && Number.isFinite(cm) ? `（${cm}cm）` : '';
+  const height = typeof cm === 'number' && Number.isFinite(cm) ? `（${arrivalHeightText(cm)}）` : '';
   return `間に合うかどうかは、ゆっくり歩く速さに避難を始めるまでの${EVAC_START_MIN}分を足した時間を、海岸への津波の到達時間${height}と比べた目安です。`;
 }
 
@@ -95,11 +107,14 @@ export function homeViewModel(
   const cell: HazardCell = { ...baseCell, tsunamiDepth: band ? band.mid : tsunami === 'none' ? 0 : null };
   const est = estimateHome(cell, input, band ? [band.lo, band.hi] : undefined);
   if (!est || cell.intensity === null) return { status: 'nodata' };
+  const hasArrival = arrivalMin !== null && Number.isFinite(arrivalMin);
+  const caveat = hasArrival ? arrivalCaveatText(arrival!.cm) : null;
   const tsunamiVM: TsunamiVM = band
     ? { kind: typeof tsunami === 'object' && 'nearby' in tsunami ? 'nearby' : 'band', depth: band.label,
-        arrival: arrivalMin !== null && Number.isFinite(arrivalMin) ? `海岸への到達 最短約${Math.round(arrivalMin)}分（${arrival!.cm}cm）` : null,
+        arrival: hasArrival ? `海岸への到達 最短約${Math.round(arrivalMin!)}分（${arrivalHeightText(arrival!.cm)}）` : null,
         // 到達時間が不明または5分以内: 判定せず「すぐ高い所へ」（避難場所リストと同じ扱い）
-        urgent: reachBeforeTsunami(0, arrivalMin) === 'n/a' }
+        urgent: reachBeforeTsunami(0, arrivalMin) === 'n/a',
+        ...(caveat ? { arrivalCaveat: caveat } : {}) }
     : { kind: tsunami as 'none' | 'unknown' };
   const range = (r: [number, number], c: number): RangeVM => ({ min: formatPct(r[0]), max: formatPct(r[1]), central: formatPct(c) });
   const notes: string[] = [];
@@ -128,6 +143,8 @@ export function homeTsunamiLines(t: TsunamiVM): { text: string; cls: string }[] 
       ? { text: `津波 浸水深 ${t.depth}（想定）${t.arrival ? `・${t.arrival}` : ''}`, cls: 'tsunami-line' }
       : { text: tsunamiNearbyText(t.depth), cls: 'tsunami-line' },
     ...(t.kind === 'nearby' && t.arrival ? [{ text: t.arrival, cls: 'tsunami-line' }] : []),
+    // 到達の行のすぐ下（Ruling W-d）
+    ...(t.arrival && t.arrivalCaveat ? [{ text: t.arrivalCaveat, cls: 'note tsunami-caveat' }] : []),
     ...(t.arrival ? [{ text: TSUNAMI_ARRIVAL_NOTE, cls: 'note' }] : []),
     ...(t.urgent ? [{ text: REACH_TEXT['n/a'], cls: 'strong tsunami-urgent' }] : []),
   ];

@@ -4,7 +4,7 @@
 （既定 data/raw/baseline_mie_public_data。環境変数 MIE_BASELINE で変えられる）。
 - 建物: --pref 24 で作り pipeline.merge で統合した結果が、全メッシュ・市町対応表とも一致。
 - 避難場所: 同様に、2次メッシュごとの id の集合と内容が一致（統合後は id 順に並ぶ）。
-- ハザード: 4県の抽出（tokai_*.csv.gz）から作り直し、基準にある全メッシュの値が一致（Ruling T6-a）。
+- ハザード: 内閣府の抽出（tokai_*.csv.gz）から作り直し、基準にある全メッシュの値が一致（Ruling T6-a）。
 """
 import json
 import os
@@ -73,7 +73,7 @@ def test_shelters_unchanged(merged):
     assert compared > 0
 
 
-@pytest.mark.skipif(not TOKAI.exists(), reason="4県の内閣府抽出がない")
+@pytest.mark.skipif(not TOKAI.exists(), reason="内閣府の抽出（tokai_*）がない")
 @pytest.mark.parametrize("case", [c for c in CASES if c != "L2_KIHON"])  # 基準に無いケース（T7 で追加）は除く
 def test_hazard_unchanged_from_tokai_extract(tmp_path, case):
     suffix = CASES[case]

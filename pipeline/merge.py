@@ -3,7 +3,8 @@
 2次メッシュ JSON（??????.json）:
   - 辞書（建物・ハザード）: 250m メッシュのキーの和。同じキーが複数の県にあれば値が一致すること（不一致は ValueError）。
   - リスト（避難場所）: id の和。同じ id は内容が一致すれば1件、違えば ValueError。
-index.json（対応範囲）は和、municipality_meshes.json は市町村名の和（同じ名前が複数の県にあれば ValueError）。
+index.json（対応範囲）は和、municipality_meshes.json は市町村名の和。同じ名前が複数の県にあれば（愛知県・和歌山県の美浜町など）、
+その名前はどの県の分も県名を付けた名前（「愛知県美浜町」「和歌山県美浜町」）にする。入力から県コードが分からなければ ValueError。
 結果は入力の順に依らない（キー・id・市町村名の順に並べて書く）。
 """
 import argparse
@@ -11,6 +12,8 @@ import json
 import re
 from pathlib import Path
 from typing import Callable
+
+from pipeline.prefs import PREFS
 
 MESH_GLOB = "??????.json"
 KINDS = ("stock", "shelters")
@@ -100,6 +103,22 @@ def merge_mesh_dirs(srcs: list[Path], dst: Path, resolve: Callable[[str, list[Pa
                 win = resolve(mesh, cands)
                 skip |= {(s, mesh) for s in cands if s != win}
 
+    # 複数の入力にある市町村名は県名を付ける（どの県の分も）
+    seen: dict[str, int] = {}
+    for s in mm_in:
+        for name in mm_in[s]:
+            seen[name] = seen.get(name, 0) + 1
+    shared = {n for n, c in seen.items() if c > 1}
+
+    def muni_key(s: Path, name: str) -> str:
+        if name not in shared:
+            return name
+        try:
+            pref = PREFS[_pref_of(s)]
+        except (ValueError, KeyError):
+            raise ValueError(f"市町村名 {name} が複数の入力にあり、{s} の県が分からない（県名を付けられない）")
+        return pref + name
+
     files: dict[str, tuple[type, dict]] = {}
     index: set[str] | None = None
     munis: dict[str, list[str]] | None = None
@@ -120,6 +139,7 @@ def merge_mesh_dirs(srcs: list[Path], dst: Path, resolve: Callable[[str, list[Pa
         if s in mm_in:
             munis = {} if munis is None else munis
             for name, meshes in mm_in[s].items():
+                name = muni_key(s, name)
                 if name in munis:
                     raise ValueError(f"市町村名 {name} が複数の入力にある（{s}）")
                 meshes = [m for m in meshes if (s, m) not in skip]

@@ -1,6 +1,6 @@
 import { DETOUR_FACTOR, WALK_SPEED } from '../../core/evacuation.ts';
 import { REACH_TEXT, SHELTER_NOTICES, homeTsunamiLines, reachHintText, type TsunamiVM } from '../viewmodel.ts';
-import { TSUNAMI_NOTICE } from '../text.ts';
+import { SHELTER_SOURCE, TSUNAMI_NOTICE } from '../text.ts';
 import { el } from './dom.ts';
 
 export type ShelterListLike = {
@@ -30,7 +30,7 @@ export function shelterListNodes(lists: ShelterListLike[]): Node[] {
   out.push(
     el('p', { class: 'hint' }, `徒歩時間は直線距離からの目安です（直線距離×${DETOUR_FACTOR}を道のりとし、標準${WALK_SPEED.standard.toFixed(1)}m/s・ゆっくり${WALK_SPEED.slow.toFixed(1)}m/sで計算）。`),
     el('ul', { class: 'notices' }, ...SHELTER_NOTICES.map((n) => el('li', {}, n))),
-    el('p', { class: 'hint' }, '出典: 国土地理院 指定緊急避難場所データ（最終更新 2026-11-06）'),
+    el('p', { class: 'hint' }, SHELTER_SOURCE),
   );
   return out;
 }

@@ -1,8 +1,10 @@
 """県ごとの沿岸津波到達時間 CSV → 市町村名キーの到達時間 JSON。
 
-CSV 列: muni_code,muni_name と、その県で公表されている最も低い高さの列（m030 = 30cm、または m050 = 50cm）の
-どちらか1つ。m100,m300,m500,m1000 などほかの高さの列はあってもよい（形式だけ検証）。値は分、空欄＝その高さの津波は到達しない。
-出力: {市町村名: {"min": 分 または null, "cm": 30 または 50}}。キーは municipality_meshes.json の市町村名。
+CSV 列: muni_code,muni_name と、その県で公表されている最も低い高さの列（m030 = 30cm、m050 = 50cm、
+m100 = 1m のうち、ある中で最も低いもの。m030 と m050 は同時に置かない）。m100,m300,m500,m1000 などそれより高い列は
+あってもよい（形式だけ検証）。値は分、空欄＝その高さの津波は到達しない。
+出力: {市町村名: {"min": 分 または null, "cm": 30・50・100}}。キーは municipality_meshes.json の市町村名
+（別の県に同名の町村があり統合で県名付きになった名前は、市町村コードの県で引く）。
 """
 import argparse
 import csv
@@ -11,9 +13,10 @@ from datetime import date
 from pathlib import Path
 
 from pipeline.manifest import update_manifest
+from pipeline.prefs import PREFS
 
 DEFAULT_NAMES = Path("public/data/stock/municipality_meshes.json")
-LOWEST = {"m030": 30, "m050": 50}  # 最も低い高さの列 → cm
+LOWEST = {"m030": 30, "m050": 50, "m100": 100}  # 最も低い高さの列の候補（低い順）→ cm
 OTHER_COLS = ["m100", "m300", "m500", "m1000"]
 
 
@@ -31,9 +34,11 @@ def _minutes(s, where: str):
 
 
 def _lowest_col(fields, where) -> str:
-    cols = [c for c in LOWEST if c in (fields or [])]
-    if len(cols) != 1:
-        raise ValueError(f"{where}: 最も低い高さの列（{' / '.join(LOWEST)}）がちょうど1つ必要: {fields}")
+    """最も低い高さの列。m030・m050 はどちらか1つまで（両方は誤り）。どちらも無ければ m100（和歌山県 +1m。Ruling W-b）。"""
+    fields = fields or []
+    cols = [c for c in LOWEST if c in fields]
+    if not cols or ("m030" in cols and "m050" in cols):
+        raise ValueError(f"{where}: 最も低い高さの列（{' / '.join(LOWEST)}。m030 と m050 はどちらか1つ）が必要: {fields}")
     for c in ("muni_code", "muni_name"):
         if c not in fields:
             raise ValueError(f"{where}: 列 {c} がない")
@@ -48,10 +53,14 @@ def build_arrival(csvs, out: Path, names_path: Path = DEFAULT_NAMES, manifest=No
         with open(p, newline="", encoding="utf-8-sig") as f:
             reader = csv.DictReader(f)
             low = _lowest_col(reader.fieldnames, str(p))
-            others = [c for c in OTHER_COLS if c in reader.fieldnames]
+            others = [c for c in OTHER_COLS if c in reader.fieldnames and c != low]
             for i, row in enumerate(reader, start=2):
                 where = f"{p}:{i}"
                 code, name = row["muni_code"].strip(), row["muni_name"].strip()
+                # 別の県に同名の町村があると、統合（pipeline.merge）で県名付きの名前になっている（例: 和歌山県美浜町）
+                qualified = PREFS.get(code[:2], "") + name
+                if name not in valid and qualified in valid:
+                    name = qualified
                 if code in codes:
                     raise ValueError(f"{where}: 市町村コード {code} が重複（{codes[code]}）")
                 if name in result:
@@ -72,7 +81,8 @@ def build_arrival(csvs, out: Path, names_path: Path = DEFAULT_NAMES, manifest=No
     return len(result)
 
 
-COMMON_NOTE = "値は津波が海岸（汀線）に着く最短の時間で、自宅に着く時間ではない。空欄（表の「－」）は該当高さの津波が到達しない、または対象外を示し null。海に面さない市町村は行なし。出力 public/data/tsunami_arrival.json（値は {min: 分, cm: 高さ}）。"
+SHORELINE_NOTE = "値は津波が海岸（汀線）に着く最短の時間で、自宅に着く時間ではない。"
+COMMON_NOTE = "空欄（表の「－」）は該当高さの津波が到達しない、または対象外を示し null。海に面さない市町村は行なし。出力 public/data/tsunami_arrival.json（値は {min: 分, cm: 高さ}）。"
 
 # CSV のファイル名 → manifest のエントリ（出典はここに記録し、CSV には書かない）
 SOURCES = {
@@ -103,6 +113,16 @@ SOURCES = {
         "license": "静岡県公表資料（出典明記）",
         "notes": "静岡県は30cmの到達時間を公表していないため、公表されている最も低い高さ＋50cmの値を使う（アプリは「（50cm）」と表示）。3ケースの最小を市町別に書き写し（data/published/shizuoka_tsunami_arrival.csv）。政令指定都市は区の最小（浜松市=南区、静岡市=清水区）。東伊豆町はケース⑧の値が最小。",
     },
+    "wakayama_tsunami_arrival.csv": {
+        "id": "tsunami-arrival-30",
+        "name": "津波到達時間（市町別・和歌山県）",
+        "source": "和歌山県 南海トラフ地震における地震動予測及び津波浸水想定（令和8年3月）p.13 表「津波到達時間の比較」（最大クラスの巨大地震 R8、津波高+1m）",
+        "url": "https://www.pref.wakayama.lg.jp/prefg/011400/bousai/shinsui/r8sinsui_d/fil/03_jishindoutsunami.pdf",
+        "publishedDate": "令和8年3月",
+        "license": "和歌山県公表資料（出典明記）",
+        "shoreline": False,
+        "notes": "和歌山県が公表している最も低い高さは+1mのため、その到達時間を使う（アプリは「（1m）」と表示し、より低い津波はもっと早く着くことがあると添える）。値は津波が海岸線の約30m沖の地点に着く最短の時間（分未満切り捨て）で、自宅に着く時間ではない。市町別に書き写し（data/published/wakayama_tsunami_arrival.csv）。串本町は表の1分を使う（県の注記では市街地は5分。安全側として1分のまま）。",
+    },
 }
 
 
@@ -115,7 +135,8 @@ def datasets_for(csvs) -> list[dict]:
             raise ValueError(f"出典が登録されていない到達時間 CSV: {name}（{', '.join(SOURCES)}）")
         d = dict(SOURCES[name])
         d["processedDate"] = date.today().isoformat()
-        d["notes"] = d["notes"] + COMMON_NOTE
+        shoreline = d.pop("shoreline", True)  # 表の時間が汀線への到達か（和歌山県は約30m沖の地点）
+        d["notes"] = d["notes"] + (SHORELINE_NOTE if shoreline else "") + COMMON_NOTE
         out.append(d)
     return out
 

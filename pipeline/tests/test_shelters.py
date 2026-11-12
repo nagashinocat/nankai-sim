@@ -113,3 +113,30 @@ def test_cli_several_csv_and_default_mie():
     assert b.out == Path("o")
     with pytest.raises(SystemExit):  # 複数の県をまとめて出すなら --out を指定
         parse_args(["--csv", "a_21000_2.csv", "22000_2.zip"])
+
+
+# --- 国土地理院の最終更新日は県ごと（koukaidate.html、2026-11-12 確認） ---
+from pipeline.shelters import SHELTER_UPDATED, main
+
+
+def test_updated_date_per_prefecture():
+    assert SHELTER_UPDATED == {"21": "2026-10-21", "22": "2026-10-27", "23": "2026-11-04", "24": "2026-11-06", "30": "2026-10-19"}
+    assert parse_args(["--csv", "gsi_hinanbasho_30000_2.csv"]).updated == {"30": "2026-10-19"}
+    assert parse_args(["--csv", "a_21000_2.csv", "22000_2.zip", "--out", "o"]).updated == {"21": "2026-10-21", "22": "2026-10-27"}
+    # 1県のときだけ --updated で上書きできる
+    assert parse_args(["--csv", "23000_2.csv", "--updated", "2027-01-01"]).updated == {"23": "2027-01-01"}
+    with pytest.raises(SystemExit):
+        parse_args(["--csv", "a_21000_2.csv", "22000_2.zip", "--out", "o", "--updated", "2027-01-01"])
+
+
+def test_manifest_records_each_prefecture_date(tmp_path):
+    hdr = "\ufeffNO,共通ID,施設・場所名,住所,洪水,崖崩れ、土石流及び地滑り,高潮,地震,津波,大規模な火事,内水氾濫,火山現象,指定避難所との住所同一,緯度,経度,備考\r\n"
+    m = tmp_path / "m.json"
+    for code, lat, lon in (("24", 34.07, 136.19), ("30", 33.72, 135.99)):
+        c = tmp_path / f"x_{code}000_2.csv"
+        c.write_text(hdr + f"1,E{code}1,場所,住所,,,,1,1,,,,,{lat},{lon},\r\n", encoding="utf-8")
+        main(["--csv", str(c), "--out", str(tmp_path / code), "--manifest", str(m)])
+    d = [x for x in json.loads(m.read_text(encoding="utf-8"))["datasets"] if x["id"] == "gsi-shelters"][0]
+    assert d["prefNotes"] == {"24": "最終更新 2026-11-06。", "30": "最終更新 2026-10-19。"}
+    assert "【三重県】最終更新 2026-11-06。【和歌山県】最終更新 2026-10-19。" in d["notes"]
+    assert d["publishedDate"] == "県ごと（notes の【県名】最終更新）"

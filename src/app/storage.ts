@@ -63,7 +63,7 @@ function validSaved(o: Record<string, unknown>): boolean {
   if (h.liquefaction !== null && typeof h.liquefaction !== 'string') return false;
   const t = h.tsunami;
   if (!isObj(t)) return false;
-  if (t.kind === 'band' || t.kind === 'nearby') { if (!isStr(t.depth) || (t.arrival !== null && !isStr(t.arrival)) || typeof t.urgent !== 'boolean') return false; }
+  if (t.kind === 'band' || t.kind === 'nearby') { if (!isStr(t.depth) || (t.arrival !== null && !isStr(t.arrival)) || typeof t.urgent !== 'boolean' || (t.arrivalCaveat !== undefined && !isStr(t.arrivalCaveat))) return false; }
   else if (t.kind !== 'none' && t.kind !== 'unknown') return false;
   if (!Array.isArray(h.notes) || !h.notes.every((n) => typeof n === 'string')) return false;
   const a = o.area;

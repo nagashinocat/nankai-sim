@@ -81,3 +81,21 @@ Deferred:
 - Pipeline small items: housing parser chosen in two places; shelters duplicate-id first-wins vs merge raises; real-data Mie test has no skip marker; mid-file imports in two tests.
 - App small items: unused pixelCache; `caches` shadows global; createImageBitmap without colorSpaceConversion:'none'; no test of tsunami depth fed to the area estimate; comments still say 市町名; e2e skip guard checks only two files.
 - Wakayama next (pipeline is per-prefecture now).
+
+## 和歌山県の追加（2026-11-12）— rulings and implementer decisions
+
+Rulings (brief and controller): W-a Wakayama's published 「揺れ等による全壊」 includes liquefaction and slope failure, so reconcile for 30 compares against shaking + liquefaction collapse (`--shake-only` for reference); slope failure is not modelled. W-b Wakayama arrival height is +1 m (cm = 100); heights are written 「{cm}cm」 below 100 and 「{cm/100}m」 at 100 or more.
+W-c on a name collision only the colliding names are prefixed with the prefecture (愛知県美浜町 / 和歌山県美浜町); unresolvable collisions still fail (accepted). W-d when the arrival height is above 30 cm (静岡 50cm, 和歌山 1m), the home result adds under the arrival line 「この時間は{高さ}の津波が着く時間です。それより低い津波はもっと早く着くことがあります」. GSI shelter last-updated dates are per prefecture (koukaidate.html, checked 2026-11-12): 岐阜 2026-10-21, 静岡 2026-10-27, 愛知 2026-11-04, 三重 2026-11-06, 和歌山 2026-10-19 — pipeline/shelters.py SHELTER_UPDATED writes them to the manifest prefNotes; the in-app source line gives the range 2026-10-19〜2026-11-06.
+
+Implementer decisions (to confirm):
+- A3 amended: 美浜町 exists in both 愛知県 and 和歌山県. Merge no longer fails on a cross-prefecture name collision when the inputs carry a prefecture code; every colliding name is prefixed with its prefecture (愛知県美浜町 / 和歌山県美浜町), order-independent. A collision without a prefecture code, or a prefixed name clashing with an existing name, still fails. tsunami_arrival resolves the prefixed name through muni_code; reconcile.ts tries 「県名＋市町村名」 first.
+- e-Stat 表6-3-2 is read per prefecture block, so 和歌山県美浜町 no longer picks up 愛知県美浜町's housing mix (it uses the prefecture fallback).
+- Wakayama arrival CSV keeps only muni_code,muni_name,m100; the 串本町 note (市街地は5分) is in the manifest notes.
+- Pin-picker start view: centre of the five-prefecture bounding box (west 134.99) with the largest integer zoom that fits the map (6 on a 390×300 map), instead of a fixed zoom 7–8, which does not fit all five prefectures on a phone (accepted).
+
+Deferred:
+- Wakayama reconcile 20/30 (1.03× total); upward misses concentrated in towns using the prefecture housing fallback (19 of 30 municipalities).
+
+## 和歌山（2026-11-12）
+Rulings: W-a reconcile vs 「揺れ等」 with our shaking + liquefaction (87,002 vs 84,700 = 1.03, 20/30). W-b arrival height 1m (lowest Wakayama publishes, R8 table, ~30 m offshore). W-c only colliding municipality names are prefixed (愛知県美浜町 / 和歌山県美浜町). W-d caveat under arrival times measured at heights above 30 cm. Start map view fits all 5 prefectures (zoom 6 on phones).
+Deferred: the app still says 「海岸への到達」 for Wakayama (times are to ~30 m offshore); housing parser selection in two places.

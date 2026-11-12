@@ -107,11 +107,25 @@ export function legendElement(): HTMLElement {
   );
 }
 
+/** 対応する5県（静岡・愛知・岐阜・三重・和歌山）の外接矩形 [[南, 西], [北, 東]]（和歌山県 友ヶ島 134.998°E〜静岡県 熱海、串本町 潮岬〜岐阜県 北端）。 */
+const COVER_BOUNDS: [[number, number], [number, number]] = [[33.43, 134.99], [36.47, 139.18]];
+
+/** 矩形が幅 w・高さ h（px）に収まる最大の整数ズーム（Web メルカトル、256px タイル）。大きさが 0 なら null。 */
+function zoomToFit(b: [[number, number], [number, number]], w: number, h: number): number | null {
+  if (!(w > 0 && h > 0)) return null;
+  const merc = (lat: number) => { const s = Math.sin((lat * Math.PI) / 180); return 0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI); };
+  const dx = ((b[1][1] - b[0][1]) / 360) * 256;
+  const dy = Math.abs(merc(b[0][0]) - merc(b[1][0])) * 256;
+  return Math.max(4, Math.min(10, Math.floor(Math.log2(Math.min(w / dx, h / dy)))));
+}
+
 /** 0件のとき: ピンを動かして場所を決める地図。 */
 export function createPinPicker(node: HTMLElement, onMove: (p: LatLon) => void, start?: LatLon): { map: L.Map; get(): LatLon } {
-  const center = start ?? { lat: 35.0, lon: 137.3 }; // 静岡・愛知・岐阜・三重の4県の中ほどから開始
+  // 静岡・愛知・岐阜・三重・和歌山の5県の外接矩形の中ほどから、5県が全部見える縮尺で開始
+  const center = start ?? { lat: (COVER_BOUNDS[0][0] + COVER_BOUNDS[1][0]) / 2, lon: (COVER_BOUNDS[0][1] + COVER_BOUNDS[1][1]) / 2 };
   disposePinPicker();
-  const map = baseMap(node, center, start ? 15 : 8);
+  // 5県が収まる縮尺（スマートフォンの幅・高さ300pxでは 6）。大きさが分からなければ 7
+  const map = baseMap(node, center, start ? 15 : zoomToFit(COVER_BOUNDS, node.clientWidth, node.clientHeight) ?? 7);
   pickerMap = map;
   const marker = L.marker([center.lat, center.lon], {
     draggable: true,

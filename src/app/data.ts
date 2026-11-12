@@ -12,7 +12,7 @@ export type Manifest = {
   datasets: { id: string; source: string; url?: string; notes?: string; [k: string]: unknown }[];
 };
 
-/** 市町村の津波到達時間。min は海岸に着く最短の分（「－」は null）、cm はその高さ（その県で公表されている最も低い高さ。三重・愛知 30、静岡 50）。 */
+/** 市町村の津波到達時間。min は海岸に着く最短の分（「－」は null）、cm はその高さ（その県で公表されている最も低い高さ。三重・愛知 30、静岡 50、和歌山 100）。 */
 export type Arrival = { min: number | null; cm: number };
 
 function isArrival(v: unknown): v is Arrival {
@@ -23,7 +23,7 @@ function isArrival(v: unknown): v is Arrival {
 
 export interface DataSource {
   /**
-   * 対応範囲は 250m メッシュ単位（Ruling F1・F4: メッシュの四角が4県の境界と面積>0で重なる）。
+   * 対応範囲は 250m メッシュ単位（Ruling F1・F4: メッシュの四角が5県の境界と面積>0で重なる）。
    * 2次メッシュが {case}/index.json に無い、またはファイルにそのメッシュの行が無い（隣県など）なら 'outside'。
    * 行はあるが想定値が無い（震度が null）なら null（データなし）。
    * index.json にあるのにファイルが読めない（404・HTML・壊れた JSON）、または index.json が読めないときは例外（再試行できる）。
@@ -126,7 +126,7 @@ export function createDataSource(fetcher: Fetcher, base = '/data'): DataSource {
   async function hazardCell(caseId: string, mesh: string): Promise<HazardCell | null | 'outside'> {
     if (!(await coverageOf(caseId)).has(mesh2Of(mesh))) return 'outside';
     const row = rowOf(await hazardFile(caseId, mesh), mesh);
-    if (!row) return 'outside'; // 同じ2次メッシュでも4県外（隣県）のメッシュには行が無い（Ruling F1）
+    if (!row) return 'outside'; // 同じ2次メッシュでも5県外（隣県）のメッシュには行が無い（Ruling F1）
     const cell = toCell(row);
     return cell.intensity === null ? null : cell;
   }

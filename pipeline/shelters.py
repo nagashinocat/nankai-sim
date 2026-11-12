@@ -19,6 +19,8 @@ from pipeline.manifest import update_manifest_pref
 from pipeline.prefs import PREFS
 
 DEFAULT_CSV = Path("data/raw/shelters/gsi_hinanbasho_24000_2.csv")
+# 国土地理院 指定緊急避難場所データの県ごとの最終更新日（https://hinanmap.gsi.go.jp/hinanjocp/hinanbasho/koukaidate.html、2026-11-12 確認）
+SHELTER_UPDATED = {"21": "2026-10-21", "22": "2026-10-27", "23": "2026-11-04", "24": "2026-11-06", "30": "2026-10-19"}
 _PREF_FILE = re.compile(r"(\d{2})000_2\.(?:csv|zip)$")
 
 LAT_UNITS = 480  # 5次メッシュ: 緯度 1/480 度
@@ -116,12 +118,21 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--csv", nargs="+", default=[DEFAULT_CSV], type=Path, help="CSV または zip（…NNNNN_2）")
     ap.add_argument("--out", type=Path, help="既定 build/data-build/<県コード>/shelters（1県のときのみ）")
     ap.add_argument("--manifest", default="public/data/manifest.json", type=Path)
-    ap.add_argument("--updated", default="2026-11-06", help="データの最終更新日")
+    ap.add_argument("--updated", help="データの最終更新日（1県のときだけ。既定は SHELTER_UPDATED の県の日付）")
     a = ap.parse_args(argv)
     try:
         a.prefs = prefs_of(a.csv)
     except ValueError as e:
         ap.error(str(e))
+    if a.updated is not None:
+        if len(a.prefs) != 1:
+            ap.error("--updated は1県のファイルのときだけ指定できる（県ごとに日付が違う）")
+        a.updated = {a.prefs[0]: a.updated}
+    else:
+        missing = [p for p in a.prefs if p not in SHELTER_UPDATED]
+        if missing:
+            ap.error(f"最終更新日が分からない県: {missing}（--updated で指定）")
+        a.updated = {p: SHELTER_UPDATED[p] for p in a.prefs}
     if a.out is None:
         if len(a.prefs) != 1:
             ap.error("複数の県のファイルを渡すときは --out を指定する")
@@ -140,13 +151,13 @@ def main(argv=None) -> None:
                 "name": "指定緊急避難場所データ（{prefs}）",
                 "source": "国土地理院 指定緊急避難場所データ",
                 "url": "https://hinanmap.gsi.go.jp/hinanjocp/hinanbasho/koukaidate.html",
-                "publishedDate": args.updated,
+                "publishedDate": "県ごと（notes の【県名】最終更新）",
                 "license": "国土地理院コンテンツ利用規約・ご利用上の注意（出典明記）",
                 "processedDate": date.today().isoformat(),
                 "notes": "緯度経度が数値でない行は除外。共通ID の重複は1件にまとめる。地震・津波の対応可否のみ使用。データは最新でない場合や未掲載の場合がある。指定緊急避難場所と指定避難所は別。出力 public/data/shelters/ は git 対象外。",
             },
             pref,
-            "最終更新 " + args.updated + "。",
+            "最終更新 " + args.updated[pref] + "。",
         )
 
 if __name__ == "__main__":

@@ -15,9 +15,9 @@ export function buildShareText(municipality: string | null, collapse: RangeVM, h
 /** 結果の上の方に必ず出す（final review C2・裁定 F2）。 */
 export const TSUNAMI_NOTICE = 'この結果に津波の被害は含まれていません。海の近くで強い揺れを感じたら、すぐに高い所へ避難してください';
 
-/** 対応範囲外（250m メッシュの四角が4県の陸と重ならない。想定データに行が無い。Ruling F1・F4）。「揺れが小さい」とは決して言わない（裁定 F1）。 */
+/** 対応範囲外（250m メッシュの四角が5県の陸と重ならない。想定データに行が無い。Ruling F1・F4）。「揺れが小さい」とは決して言わない（裁定 F1）。 */
 export const OUTSIDE_TITLE = 'この地域はまだ対応していません';
-export const OUTSIDE_DETAIL = '現在は静岡県・愛知県・岐阜県・三重県の想定データを使っています。お住まいの地域の想定は、市町村のハザードマップや、次のハザードマップポータルサイトで確認してください。';
+export const OUTSIDE_DETAIL = '現在は静岡県・愛知県・岐阜県・三重県・和歌山県の想定データを使っています。お住まいの地域の想定は、市町村のハザードマップや、次のハザードマップポータルサイトで確認してください。';
 export const HAZARD_PORTAL = { url: 'https://disaportal.gsi.go.jp/', label: 'ハザードマップポータルサイト（国土地理院）' } as const;
 
 /** 津波の浸水想定（Global Constraints の文言）。 */
@@ -30,3 +30,6 @@ export const TSUNAMI_ARRIVAL_NOTE = '到達時間は海岸に津波が着く最�
 export const TSUNAMI_ATTRIBUTION = '出典：ハザードマップポータルサイト（津波浸水想定：各都道府県）。浸水深の段階はタイルの色から本アプリが判定（加工して作成）。最新・詳細はお住まいの市町村のハザードマップをご確認ください';
 /** 地図右下の短い表示（全文は地図の下に出す）。 */
 export const TSUNAMI_CREDIT_SHORT = 'ハザードマップポータルサイト';
+
+/** 避難場所データの出典。最終更新日は県ごとに違う（岐阜 2026-10-21・静岡 10-27・愛知 11-04・三重 11-06・和歌山 10-19。pipeline/shelters.py SHELTER_UPDATED） */
+export const SHELTER_SOURCE = '出典: 国土地理院 指定緊急避難場所データ（最終更新は県ごとに 2026-10-19〜2026-11-06）';

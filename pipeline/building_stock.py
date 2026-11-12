@@ -3,14 +3,15 @@
 国勢調査メッシュ（世帯総数）+ 小地域境界 + 住宅・土地統計（構造×建築時期）+
 固定資産概要調書（市町の棟数）→ メッシュ別の建物棟数と構造×年代の割合。
 
-県ごとに実行する（--pref 21/22/23/24）。出力は既定で build/data-build/<pref>/stock/。
-4県分を pipeline.merge で public/data/stock/ に統合する。
+県ごとに実行する（--pref 21/22/23/24/30）。出力は既定で build/data-build/<pref>/stock/。
+5県分を pipeline.merge で public/data/stock/ に統合する。
 
 出力: {out_dir}/{mesh2}.json = {"<mesh250>": {"total": 棟数, "shares": {"wood:pre1981": ..}}}
       {out_dir}/municipality_meshes.json = {市町名: [mesh250, ...]}
 """
 import argparse
 import csv
+import functools
 import json
 import re
 from dataclasses import dataclass, field
@@ -146,13 +147,22 @@ def parse_housing_6_3(txt: Path) -> dict[str, dict[str, float]]:
 _ESTAT_COLS = ["name"] + [f"{s}_{e.removeprefix('y')}" for s in STRUCTS for e in ERAS]
 
 
-def parse_housing_estat_csv(path: Path) -> dict[str, dict[str, float]]:
+def _is_pref_row(name: str) -> bool:
+    """表6-3-2 の県計の行（「〇〇県」など）。市町村名が都・道・府・県で終わることはない。"""
+    return name.endswith(("都", "道", "府", "県"))
+
+
+def parse_housing_estat_csv(path: Path, pref: str | None = None) -> dict[str, dict[str, float]]:
     """e-Stat 令和5年住宅・土地統計調査 表6-3-2 を構造3区分×年代3区分に集計済みの CSV を読む。
 
-    列: name,wood_pre1981,wood_1981_2000,wood_post2000,rc_...,steel_...。行は県計と市町村（政令市は市全体）。
-    戻り値は parse_housing_6_3 と同じ形（名前 → {"wood:pre1981": 住宅数, ...}）。"-" は 0。名前の重複は ValueError。
+    列: name,wood_pre1981,wood_1981_2000,wood_post2000,rc_...,steel_...。行は県計と、その後に続くその県の市町村（政令市は市全体）。
+    戻り値は parse_housing_6_3 と同じ形（名前 → {"wood:pre1981": 住宅数, ...}）。"-" は 0。
+    pref（県名）を渡すと、その県計の行から次の県計の行までのブロックだけを返す（別の県の同名町村、例: 愛知県・和歌山県の美浜町を混ぜない）。
+    その県が無ければ ValueError。名前の重複は、pref を渡したときはブロックの中、渡さないときはファイル全体で ValueError。
     """
-    out: dict[str, dict[str, float]] = {}
+    blocks: dict[str, dict[str, dict[str, float]]] = {}
+    flat: dict[str, dict[str, float]] = {}
+    current: dict[str, dict[str, float]] | None = None
     with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.reader(f)
         header = [h.strip() for h in next(reader)]
@@ -162,7 +172,14 @@ def parse_housing_estat_csv(path: Path) -> dict[str, dict[str, float]]:
             if not row or not row[0].strip():
                 continue
             name = row[0].strip()
-            if name in out:
+            if _is_pref_row(name):
+                if name in blocks:
+                    raise ValueError(f"{path}:{i}: 県 {name} が重複")
+                current = blocks[name] = {}
+            if current is None:
+                raise ValueError(f"{path}:{i}: 県計の行より前に市町村の行がある: {name}")
+            scope = current if pref is not None else flat
+            if name in scope:
                 raise ValueError(f"{path}:{i}: 名前 {name} が重複")
             if len(row) != len(_ESTAT_COLS):
                 raise ValueError(f"{path}:{i}: 列数が違う: {row}")
@@ -173,8 +190,13 @@ def parse_housing_estat_csv(path: Path) -> dict[str, dict[str, float]]:
                     raise ValueError(f"{path}:{i}: 数値でない: {tok!r}")
                 s_, e_ = col.split("_", 1)
                 vals[f"{s_}:{e_ if e_ in ERAS else 'y' + e_}"] = _num(tok)
-            out[name] = vals
-    return out
+            current[name] = vals
+            flat.setdefault(name, vals)
+    if pref is None:
+        return flat
+    if pref not in blocks:
+        raise ValueError(f"{path}: 県計 {pref} がない")
+    return blocks[pref]
 
 
 @dataclass(frozen=True)
@@ -194,7 +216,8 @@ def pref_inputs(code: str, raw: Path) -> PrefInputs:
     if code == "24":
         housing, parser = raw / "housing" / "mie_housing_r5.txt", parse_housing_6_3
     else:
-        housing, parser = raw / "housing" / ESTAT_HOUSING, parse_housing_estat_csv
+        # 県のブロックだけを読む（別の県の同名町村を混ぜない）。県を渡さない呼び方はできないようにする
+        housing, parser = raw / "housing" / ESTAT_HOUSING, functools.partial(parse_housing_estat_csv, pref=PREFS[code])
     return PrefInputs(code, PREFS[code], raw / "boundary" / f"r2ka{code}.shp", housing, parser)
 
 
@@ -270,7 +293,7 @@ def build_stock_full(census_dir, boundary_shp, housing, kotei, out_dir, pref: st
     pref_name = PREFS[pref]
     out_dir = Path(out_dir)
     hh = {m: v for m, v in read_households(census_dir).items() if v > 0}
-    stock_h = (parse_housing_6_3 if pref == "24" else parse_housing_estat_csv)(housing)
+    stock_h = parse_housing_6_3(housing) if pref == "24" else parse_housing_estat_csv(housing, pref_name)
     if pref_name not in stock_h:
         raise ValueError(f"{housing}: 県計 {pref_name} がない")
     pref_h = stock_h[pref_name]
@@ -343,6 +366,12 @@ def build_stock(census_dir, boundary_shp, housing, kotei, out_dir, pref: str = "
     return build_stock_full(census_dir, boundary_shp, housing, kotei, out_dir, pref).totals
 
 
+# 県別の補足（manifest の prefNotes に付ける）
+HOUSING_PREF_NOTES = {
+    "30": "白浜町は表6-3-2 の行の2001年以降が 0 で使えないため入れていない。表の美浜町は愛知県の町のため、和歌山県の美浜町には使わない。",
+}
+
+
 def parse_args(argv=None) -> argparse.Namespace:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pref", required=True, choices=sorted(PREFS), help="県コード（2桁）")
@@ -372,6 +401,7 @@ def main(argv=None) -> None:
     print("県計割合で代用:", "、".join(r.fallback) or "なし")
     today = date.today().isoformat()
     fallback_note = ("県計割合で代用: " + "、".join(r.fallback) + "。") if r.fallback else "県計割合での代用なし。"
+    fallback_note += HOUSING_PREF_NOTES.get(a.pref, "")
     update_manifest_pref(
         a.manifest,
         {
@@ -415,7 +445,7 @@ def main(argv=None) -> None:
                     "メッシュ中心点を含む市町村に割り当て、固定資産の棟数（木造・木造以外）を世帯総数で按分。"
                     "構造×年代の割合は表6-3-2（建築時期は1970以前+1971-80=pre1981、1981-90+1991-2000=1981-2000、2001-2023=post2000。"
                     "構造は木造・鉄筋鉄骨コンクリート造・鉄骨造、その他は除外。「-」は 0）を木造/非木造の棟数比で重み付け。"
-                    "政令指定都市は市全体の値。市町村の値がなければ県計の割合で代用。"
+                    "政令指定都市は市全体の値。市町村の値は同じ県のブロックの中だけで引き（別の県の同名町村は使わない）、なければ県計の割合で代用。"
                 ),
             },
             a.pref,

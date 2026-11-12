@@ -204,7 +204,7 @@ def test_all_zero_households_raises(tmp_path):
 
 # --- 県コード対応 ---
 def test_prefs_codes():
-    assert PREFS == {"21": "岐阜県", "22": "静岡県", "23": "愛知県", "24": "三重県"}
+    assert PREFS == {"21": "岐阜県", "22": "静岡県", "23": "愛知県", "24": "三重県", "30": "和歌山県"}
 
 
 def test_pref_inputs_mie_uses_6_3_text(tmp_path):
@@ -215,13 +215,13 @@ def test_pref_inputs_mie_uses_6_3_text(tmp_path):
     assert p.parse_housing is parse_housing_6_3
 
 
-@pytest.mark.parametrize("code,name", [("21", "岐阜県"), ("22", "静岡県"), ("23", "愛知県")])
+@pytest.mark.parametrize("code,name", [("21", "岐阜県"), ("22", "静岡県"), ("23", "愛知県"), ("30", "和歌山県")])
 def test_pref_inputs_tokai_use_estat_csv(tmp_path, code, name):
     p = pref_inputs(code, tmp_path)
     assert p.name == name
     assert p.boundary == tmp_path / "boundary" / f"r2ka{code}.shp"
     assert p.housing == tmp_path / "housing" / "estat_r5_6-3-2_tokai_raw.csv"
-    assert p.parse_housing is parse_housing_estat_csv
+    assert p.parse_housing.func is parse_housing_estat_csv and p.parse_housing.keywords == {"pref": name}
 
 
 def test_pref_inputs_unknown_code(tmp_path):
@@ -259,6 +259,23 @@ def test_parse_housing_estat_csv_duplicate_name_raises(tmp_path):
     p.write_text("\n".join(lines + [lines[2]]) + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="岐阜市"):
         parse_housing_estat_csv(p)
+
+
+def test_parse_housing_estat_csv_scoped_to_prefecture_block(tmp_path):
+    """同名の町村が別の県にある（愛知県美浜町・和歌山県美浜町）。pref を渡すとその県のブロックだけを読む。"""
+    p = tmp_path / "h.csv"
+    lines = (FIX / "housing_estat.csv").read_text(encoding="utf-8").splitlines()
+    p.write_text("\n".join(lines + ["美浜町,1,2,3,4,5,6,7,8,9", "和歌山県,10,20,30,40,50,60,70,80,90", "和歌山市,1,1,1,1,1,1,1,1,1"]) + "\n", encoding="utf-8")
+    w = parse_housing_estat_csv(p, "和歌山県")
+    assert set(w) == {"和歌山県", "和歌山市"}
+    a = parse_housing_estat_csv(p, "愛知県")
+    assert set(a) == {"愛知県", "名古屋市", "豊橋市", "美浜町"}
+    with pytest.raises(ValueError, match="三重県"):
+        parse_housing_estat_csv(p, "三重県")
+    # 同じ県のブロックの中の重複は誤り。別の県なら同名でもよい
+    p.write_text("\n".join(lines + ["美浜町,1,2,3,4,5,6,7,8,9", "和歌山県,10,20,30,40,50,60,70,80,90", "美浜町,1,1,1,1,1,1,1,1,1"]) + "\n", encoding="utf-8")
+    assert parse_housing_estat_csv(p, "和歌山県")["美浜町"]["wood:pre1981"] == 1
+    assert parse_housing_estat_csv(p, "愛知県")["美浜町"]["wood:pre1981"] == 1 and parse_housing_estat_csv(p, "愛知県")["美浜町"]["wood:post2000"] == 3
 
 
 def test_parse_housing_estat_csv_bad_header_raises(tmp_path):
@@ -353,3 +370,47 @@ def test_parse_housing_estat_real_has_tokai_prefs():
     for name in ("岐阜県", "静岡県", "愛知県", "名古屋市", "静岡市", "浜松市", "岐阜市"):
         assert name in h
     assert not any(n.endswith("区") for n in h)
+
+
+@needs_raw
+def test_parse_housing_estat_real_has_wakayama():
+    f = RAW / "housing" / "estat_r5_6-3-2_tokai_raw.csv"
+    if not f.exists():
+        pytest.skip("e-Stat 表6-3-2 がない")
+    h = parse_housing_estat_csv(f)
+    assert "和歌山県" in h and "和歌山市" in h
+    # 白浜町は表の2001年以降が 0 の行だったため入れていない（県計の割合で代用する）
+    assert "白浜町" not in h
+
+
+@needs_raw
+def test_build_stock_wakayama_real(tmp_path):
+    """和歌山県（30）の建物が作れる: 固定資産の棟数を保存し、白浜町は県計割合で代用。"""
+    p = pref_inputs("30", RAW)
+    for f in (p.boundary, p.housing):
+        if not f.exists():
+            pytest.skip(f"{f} がない")
+    kotei = RAW / "kotei" / "kotei_r06_soukatsu.xlsx"
+    r = build_stock_full(RAW / "census_mesh", p.boundary, p.housing, kotei, tmp_path / "stock", pref="30")
+    counts = parse_kotei(kotei, "和歌山県")
+    assert len(counts) == 30 and set(r.totals) == set(counts)
+    for name, (w, n) in counts.items():
+        assert r.allocated[name] == pytest.approx(w + n, abs=0.5), name
+    assert "白浜町" in r.fallback
+    # 表6-3-2 の「美浜町」は愛知県の美浜町。和歌山県の美浜町に使わない（県のブロックの中だけで引く）
+    assert "美浜町" in r.fallback
+    assert "和歌山市" not in r.fallback
+    mm = json.loads((tmp_path / "stock" / "municipality_meshes.json").read_text(encoding="utf-8"))
+    assert latlon_to_mesh250(34.2306, 135.1708) in mm["和歌山市"]  # 和歌山市役所
+
+
+def test_pref_inputs_parse_housing_is_bound_to_the_prefecture(tmp_path):
+    """PrefInputs.parse_housing は県のブロックだけを読む（別の県の同名町村、美浜町を混ぜない。review M-3）。"""
+    lines = (FIX / "housing_estat.csv").read_text(encoding="utf-8").splitlines()
+    (tmp_path / "housing").mkdir()
+    (tmp_path / "housing" / "estat_r5_6-3-2_tokai_raw.csv").write_text(
+        "\n".join(lines + ["美浜町,1,2,3,4,5,6,7,8,9", "和歌山県,10,20,30,40,50,60,70,80,90", "和歌山市,1,1,1,1,1,1,1,1,1"]) + "\n", encoding="utf-8")
+    w = pref_inputs("30", tmp_path)
+    assert set(w.parse_housing(w.housing)) == {"和歌山県", "和歌山市"}
+    a = pref_inputs("23", tmp_path)
+    assert "美浜町" in a.parse_housing(a.housing)

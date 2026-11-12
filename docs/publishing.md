@@ -12,21 +12,24 @@
 3. `public/data` 配下（hazard / stock / shelters）はローカルのパイプラインで生成する（git には入っていない）。公開物にはこのデータを含める必要があるので、ビルドの前にパイプラインで生成しておく。手順（リポジトリのルートで実行）:
    ```sh
    # 建物・避難場所は県ごとに作る（出力 build/data-build/<県コード>/。public/ の外で git 対象外）
-   for p in 21 22 23 24; do python3 -m pipeline.building_stock --pref $p; done
-   for p in 21 22 23 24; do python3 -m pipeline.shelters --csv data/raw/shelters/gsi_hinanbasho_${p}000_2.csv; done
-   # 4県分を public/data/{stock,shelters} に統合（同じメッシュの値が違えば失敗。県境のメッシュは境界の規則で決め、件数を表示）
-   python3 -m pipeline.merge --src build/data-build/21 build/data-build/22 build/data-build/23 build/data-build/24 --dst public/data
-   # 想定データ（対応範囲は 250m メッシュ単位: 四角が4県の境界 data/raw/boundary/r2ka21〜24 の和と面積>0で重なる（Ruling F4）。
+   for p in 21 22 23 24 30; do python3 -m pipeline.building_stock --pref $p; done
+   for p in 21 22 23 24 30; do python3 -m pipeline.shelters --csv data/raw/shelters/gsi_hinanbasho_${p}000_2.csv; done
+   # 5県分を public/data/{stock,shelters} に統合（同じメッシュの値が違えば失敗。県境のメッシュは境界の規則で決め、件数を表示。
+   #   別の県に同名の町村があれば（愛知県・和歌山県の美浜町）、どちらも県名付きの名前（愛知県美浜町・和歌山県美浜町）にする）
+   python3 -m pipeline.merge --src build/data-build/21 build/data-build/22 build/data-build/23 build/data-build/24 build/data-build/30 --dst public/data
+   # 想定データ（対応範囲は 250m メッシュ単位: 四角が5県の境界 data/raw/boundary/r2ka{21,22,23,24,30} の和と面積>0で重なる（Ruling F4）。
+   #   入力は各ケースで tokai_* と、和歌山県の東経135度以西（1次メッシュ 5034・5134）の w34_* の両方（既定）。
    #   統合後の建物のメッシュがすべて範囲内かも確かめるので、先に上の統合を済ませる）
    #   公開: L2・HALF_E・HALF_W → public/data/hazard
    #   照合用: L2_RIKU・L2_KIHON → build/hazard-reconcile（公開しない）
    python3 -m pipeline.naikaku_hazard
    # 津波到達時間（市町村名は統合後の municipality_meshes.json で確認）
-   python3 -m pipeline.tsunami_arrival --csv data/published/shizuoka_tsunami_arrival.csv data/published/aichi_tsunami_arrival.csv data/published/mie_tsunami_arrival.csv
+   python3 -m pipeline.tsunami_arrival --csv data/published/shizuoka_tsunami_arrival.csv data/published/aichi_tsunami_arrival.csv data/published/mie_tsunami_arrival.csv data/published/wakayama_tsunami_arrival.csv
    ```
    各コマンドは `public/data/manifest.json` の該当エントリを書き直す。`build/` は `public/` の外なので公開物には入らない。統合の後も、照合（`scripts/reconcile.ts`）には次の2つが要る（消すと照合できない）:
    - `build/hazard-reconcile/`（L2_RIKU・L2_KIHON のハザード。県の公表値と比べるケース）
    - `build/data-build/22/stock/municipality_meshes.json`（静岡県の `--totals-only` が市町村の一覧に使う）
+   照合の実行例は docs/reports/2026-11-12-tokai-reconcile.md・docs/reports/2026-11-12-wakayama-reconcile.md にある（和歌山県は `npx tsx scripts/reconcile.ts --pref 30 --national 84700`。既定で揺れ＋液状化、`--shake-only` で揺れのみ）。
    それ以外の `build/data-build/` は統合の後に消してよい（作り直すときは上の手順をもう一度実行する）。
    想定データの2次メッシュのファイルには対応範囲の 250m メッシュの行だけが入り（範囲内で想定値の無いメッシュは全項目 null の行）、各ケースのフォルダに `index.json`（ファイルのある2次メッシュの一覧）も書き出される。アプリは `index.json` に無い2次メッシュと、ファイルに行の無いメッシュ（同じ2次メッシュの隣県の場所）を「この地域はまだ対応していません」、null の行を「この場所のデータなし」と表示し、`index.json` にあるのにファイルが読めないときは読み込み失敗（再試行ボタン）として扱う。
 4. 静的ホストの設定:

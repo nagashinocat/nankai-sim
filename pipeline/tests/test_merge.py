@@ -65,10 +65,30 @@ def test_same_mesh_different_value_raises(tmp_path):
         merge_mesh_dirs([a, b], tmp_path / "dst")
 
 
-def test_municipality_name_collision_raises(tmp_path):
+def test_municipality_name_in_two_prefectures_gets_prefecture_prefix(tmp_path):
+    # 別の県の同名の町村（愛知県・和歌山県の美浜町など）は、どちらも県名を付けた名前にする（入力の順に依らない）
     a, b = two_prefs(tmp_path)
     put(b, "municipality_meshes.json", {"弥富市": ["5236560021"], "桑名市": ["5236570011"]})
+    for order, dst in (([a, b], "ab"), ([b, a], "ba")):
+        merge_mesh_dirs(order, tmp_path / dst)
+        mm = read(tmp_path / dst / "municipality_meshes.json")
+        assert set(mm) == {"木曽岬町", "三重県桑名市", "弥富市", "愛知県桑名市"}
+        assert mm["三重県桑名市"] == ["5236450011"] and mm["愛知県桑名市"] == ["5236570011"]
+
+
+def test_municipality_name_collision_without_prefecture_code_raises(tmp_path):
+    a, b = tmp_path / "x", tmp_path / "y"
+    put(a, "municipality_meshes.json", {"桑名市": ["5236450011"]})
+    put(b, "municipality_meshes.json", {"桑名市": ["5236570011"]})
     with pytest.raises(ValueError, match="桑名市"):
+        merge_mesh_dirs([a, b], tmp_path / "dst")
+
+
+def test_prefixed_name_clashing_with_existing_name_raises(tmp_path):
+    a, b = two_prefs(tmp_path)
+    put(a, "municipality_meshes.json", {"木曽岬町": ["5236560011", "5236560012"], "桑名市": ["5236450011"], "愛知県桑名市": []})
+    put(b, "municipality_meshes.json", {"弥富市": ["5236560021"], "桑名市": ["5236570011"]})
+    with pytest.raises(ValueError, match="愛知県桑名市"):
         merge_mesh_dirs([a, b], tmp_path / "dst")
 
 

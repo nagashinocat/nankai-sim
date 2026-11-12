@@ -19,6 +19,7 @@ def entries(p):
 
 def test_pref_label_order_and_unknown():
     assert pref_label(["24", "21", "23", "22"]) == "静岡県・愛知県・岐阜県・三重県"
+    assert pref_label(["30", "24", "21", "23", "22"]) == "静岡県・愛知県・岐阜県・三重県・和歌山県"
     assert pref_label(["24"]) == "三重県"
     with pytest.raises(ValueError):
         pref_label(["13"])

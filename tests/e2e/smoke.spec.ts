@@ -87,6 +87,49 @@ test('0件のときは地図でピンを決める', async ({ page }) => {
   await expect(page.locator('#location-note')).toHaveText('地図で選んだ場所で計算しました');
 });
 
+test('0件の地図は最初に5県（和歌山県の西端〜静岡県の東端、串本町〜岐阜県の北端）を全部見せる', async ({ page }) => {
+  const tiles: { z: number; x: number; y: number }[] = [];
+  await page.unroute('**/cyberjapandata.gsi.go.jp/**');
+  await page.route('**/cyberjapandata.gsi.go.jp/**', (r) => {
+    const m = /\/(\d+)\/(\d+)\/(\d+)\.png/.exec(r.request().url());
+    if (m) tiles.push({ z: Number(m[1]), x: Number(m[2]), y: Number(m[3]) });
+    return r.abort();
+  });
+  await page.route('**/msearch.gsi.go.jp/**', (r) => r.fulfill({ json: [] }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  await page.getByLabel('住所').fill('存在しない住所');
+  await page.getByRole('button', { name: '調べる' }).click();
+  await expect(page.locator('#pin-map')).toBeVisible();
+  // 見えている範囲（地図の四隅）が5県の外接矩形を含む
+  const box = (await page.locator('#pin-map').boundingBox())!;
+  await expect.poll(() => tiles.length).toBeGreaterThan(0);
+  const bounds = await page.evaluate(() => {
+    const el = document.querySelector('#pin-map .home-pin') as HTMLElement;
+    const map = document.querySelector('#pin-map') as HTMLElement;
+    const r = map.getBoundingClientRect();
+    const p = el.getBoundingClientRect();
+    return { w: r.width, h: r.height, pinX: p.left + p.width / 2 - r.left, pinY: p.top + p.height / 2 - r.top };
+  });
+  // 初期表示のズーム（タイルの z）で、5県の端の点がピン（5県の外接矩形の中心）からの画素オフセットで地図の中に入る
+  const z = Math.max(...tiles.map((t) => t.z));
+  const px = (lat: number, lon: number) => {
+    const n = 256 * 2 ** z;
+    const s = Math.sin((lat * Math.PI) / 180);
+    return { x: ((lon + 180) / 360) * n, y: (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n };
+  };
+  const c = px((33.43 + 36.47) / 2, (134.99 + 139.18) / 2);
+  for (const [lat, lon] of [[34.28, 134.99], [33.43, 135.76], [36.47, 137.3], [35.1, 139.15]] as const) {
+    const q = px(lat, lon);
+    const x = bounds.pinX + (q.x - c.x);
+    const y = bounds.pinY + (q.y - c.y);
+    expect(x, `${lat},${lon} at z${z}`).toBeGreaterThanOrEqual(0);
+    expect(x, `${lat},${lon} at z${z}`).toBeLessThanOrEqual(box.width);
+    expect(y, `${lat},${lon} at z${z}`).toBeGreaterThanOrEqual(0);
+    expect(y, `${lat},${lon} at z${z}`).toBeLessThanOrEqual(box.height);
+  }
+});
+
 test('愛知県（豊橋市）も対応範囲。市町名と避難場所が出る', async ({ page }) => {
   await page.route('**/msearch.gsi.go.jp/**', (r) => r.fulfill({ json: [gsiHit('愛知県豊橋市今橋町', 34.7692, 137.3914)] }));
   await page.goto('/');
@@ -99,7 +142,7 @@ test('愛知県（豊橋市）も対応範囲。市町名と避難場所が出�
 });
 
 for (const c of [
-  // 大阪市は内閣府の抽出（1次メッシュ 5235）に入るが、4県の建物が無い2次メッシュなので対応範囲外（Ruling T7-f）
+  // 大阪市は内閣府の抽出（1次メッシュ 5235）に入るが、5県の陸と重ならない2次メッシュなので対応範囲外（Ruling T7-f）
   { name: '大阪市', title: '大阪府大阪市北区中之島', input: '大阪市北区中之島1', lat: 34.6937, lon: 135.5023 },
   { name: '仙台市', title: '宮城県仙台市青葉区国分町', input: '仙台市青葉区国分町1', lat: 38.2647, lon: 140.8697 },
 ]) {
@@ -109,7 +152,7 @@ for (const c of [
     await page.getByLabel('住所').fill(c.input);
     await page.getByRole('button', { name: '調べる' }).click();
     await expect(page.getByText('この地域はまだ対応していません')).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText('静岡県・愛知県・岐阜県・三重県の想定データを使っています').first()).toBeVisible();
+    await expect(page.getByText('静岡県・愛知県・岐阜県・三重県・和歌山県の想定データを使っています').first()).toBeVisible();
     await expect(page.locator('#home-result a[href="https://disaportal.gsi.go.jp/"]')).toBeVisible();
     await expect(page.getByText('想定されていません')).toHaveCount(0);
     await expect(page.getByText('この結果に津波の被害は含まれていません').first()).toBeVisible();
@@ -168,6 +211,7 @@ test('津波: 浸水深1〜3mの色 → 浸水深・到達時間・注記・避�
   await search(page, YOKKAICHI, '四日市市');
   const home = page.locator('#home-result');
   await expect(home.getByText('津波 浸水深 1〜3m（想定）・海岸への到達 最短約15分（30cm）')).toBeVisible({ timeout: 30_000 });
+  await expect(home.locator('.tsunami-caveat')).toHaveCount(0); // 30cm は注意なし（Ruling W-d）
   // Ruling F2: 到達時間が分かっていても、自宅の津波の欄の先頭に強い一文
   await expect(home.locator('.tsunami-strong')).toHaveText(STRONG);
   expect(await home.locator('p').evaluateAll((ps, strong) => ps.findIndex((p) => p.textContent === strong) < ps.findIndex((p) => p.textContent?.startsWith('津波 浸水深')), STRONG)).toBe(true);
@@ -269,7 +313,7 @@ test('津波: タイルが 500 → 「津波の被害は含まれていません
   await expect(page.locator('#home-result').getByText('津波 浸水深')).toHaveCount(0);
 });
 
-// --- 4県対応（Task 8）。実データが無い環境ではスキップする ---
+// --- 4県対応（Task 8）・和歌山県の追加。実データが無い環境ではスキップする ---
 const hasRealData = fs.existsSync('public/data/manifest.json') && fs.existsSync('public/data/tsunami_arrival.json');
 
 test('愛知県の住所（名古屋市役所）→ 結果が出る（震度の行・市町村名の共有文）', async ({ page }) => {
@@ -286,17 +330,19 @@ test('静岡県の沿岸（焼津市役所）に 3〜5m の色 → 「（50cm）
   await stubTsunami(page, { rgb: [255, 183, 183] });
   await search(page, { lat: 34.8669, lon: 138.3237 }, '焼津市役所');
   await expect(page.locator('#home-result').getByText(/浸水深 3〜5m（想定）・海岸への到達 最短約2分（50cm）/)).toBeVisible({ timeout: 30_000 });
+  // Ruling W-d: 30cm より高い到達時間には、より低い津波はもっと早く着くことがあると添える
+  await expect(page.locator('#home-result .tsunami-caveat')).toHaveText('この時間は50cmの津波が着く時間です。それより低い津波はもっと早く着くことがあります');
   await expect(page.locator('#home-result .tsunami-strong')).toHaveText(STRONG);
   await expect(page.locator('#home-result .tsunami-urgent')).toHaveText('揺れが収まったらすぐ高い所へ');
   await expect(page.locator('#evac').getByText('揺れが収まったらすぐ高い所へ').first()).toBeVisible();
 });
 
-// Ruling F1: 対応範囲は 250m メッシュ単位（四角が4県の陸と重なるか。Ruling F4）。同じ2次メッシュでも隣県の場所は範囲外。
+// Ruling F1: 対応範囲は 250m メッシュ単位（四角が5県の陸と重なるか。Ruling F4）。同じ2次メッシュでも隣県の場所は範囲外。
 for (const c of [
-  { name: '新宮市（和歌山県・紀宝町の対岸）', title: '和歌山県新宮市春日', lat: 33.7246, lon: 135.9928 },
   { name: '湯河原町（神奈川県・熱海市の隣）', title: '神奈川県足柄下郡湯河原町', lat: 35.148, lon: 139.108 },
+  { name: '岬町（大阪府・和歌山市の隣）', title: '大阪府泉南郡岬町深日', lat: 34.3163, lon: 135.1436 },
 ]) {
-  test(`4県に隣接する ${c.name} は「まだ対応していません」（避難場所を4県分だけで出さない）`, async ({ page }) => {
+  test(`5県に隣接する ${c.name} は「まだ対応していません」（避難場所を5県分だけで出さない）`, async ({ page }) => {
     test.skip(!hasRealData, 'public/data に実データが無いためスキップ（npm run data などで生成が必要）');
     await stubTsunami(page, { rgb: [255, 216, 192] });
     await search(page, { lat: c.lat, lon: c.lon }, c.title);
@@ -313,4 +359,40 @@ test('岐阜県の山林（高山市奥飛騨・建物データなし）も対�
   await expect(page.locator('#home-result').getByText(/震度\d/)).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText('この地域はまだ対応していません')).toHaveCount(0);
   await expect(page.getByText('建物データなし（周辺の棟数は推計できません）')).toBeVisible();
+});
+
+// --- 和歌山県（30）。到達時間は +1m（Ruling W-b） ---
+test('和歌山県の住所（和歌山市役所）→ 結果が出る（震度の行・市町村名の共有文・避難場所）', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ（npm run data などで生成が必要）');
+  await search(page, { lat: 34.2306, lon: 135.1708 }, '和歌山県和歌山市七番丁２３');
+  await expect(page.locator('#home-result').getByText(/震度\d/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('この地域はまだ対応していません')).toHaveCount(0);
+  expect(await page.locator('#share-text').inputValue()).toContain('和歌山市');
+  await expect(page.locator('#evac ol.shelters li').first()).toBeVisible();
+  // 和歌山市の到達時間は +1m で45分。津波の避難場所の判定の説明は「（1m）」
+  await expect(page.locator('#evac').getByText(/到達時間（1m）と比べた目安/)).toBeVisible();
+});
+
+test('和歌山県 新宮市（以前は範囲外）に 1〜3m の色 → 到達 最短約5分（1m）・すぐ高い所へ', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ（npm run data などで生成が必要）');
+  await stubTsunami(page, { rgb: [255, 216, 192] });
+  await search(page, { lat: 33.7246, lon: 135.9928 }, '和歌山県新宮市春日');
+  await expect(page.locator('#home-result').getByText('津波 浸水深 1〜3m（想定）・海岸への到達 最短約5分（1m）')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#home-result .tsunami-caveat')).toHaveText('この時間は1mの津波が着く時間です。それより低い津波はもっと早く着くことがあります');
+  await expect(page.getByText('この地域はまだ対応していません')).toHaveCount(0);
+  await expect(page.locator('#home-result .tsunami-urgent')).toHaveText('揺れが収まったらすぐ高い所へ');
+  // 5分以内は判定しない（避難場所リストも「すぐ高い所へ」で、比較の説明は出さない）
+  await expect(page.locator('#evac').getByText('揺れが収まったらすぐ高い所へ').first()).toBeVisible();
+  await expect(page.locator('#evac').getByText(/と比べた目安/)).toHaveCount(0);
+});
+
+test('和歌山県 串本町に 1〜3m の色 → 到達 最短約1分（1m）と「揺れが収まったらすぐ高い所へ」', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ（npm run data などで生成が必要）');
+  await stubTsunami(page, { rgb: [255, 216, 192] });
+  await search(page, { lat: 33.4723, lon: 135.7814 }, '和歌山県東牟婁郡串本町串本');
+  await expect(page.locator('#home-result').getByText('津波 浸水深 1〜3m（想定）・海岸への到達 最短約1分（1m）')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('#home-result .tsunami-caveat')).toHaveText('この時間は1mの津波が着く時間です。それより低い津波はもっと早く着くことがあります');
+  await expect(page.locator('#home-result .tsunami-strong')).toHaveText(STRONG);
+  await expect(page.locator('#home-result .tsunami-urgent')).toHaveText('揺れが収まったらすぐ高い所へ');
+  await expect(page.locator('#evac').getByText('揺れが収まったらすぐ高い所へ').first()).toBeVisible();
 });

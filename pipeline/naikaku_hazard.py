@@ -2,10 +2,11 @@
 
 入力は Eq（震度）・Liq（液状化）の CSV（.csv または .csv.gz）。それぞれ複数ファイルを受け取り、
 同じメッシュが複数ファイル（または同じファイルの複数行）にあるときは値が一致することを確かめる（不一致は ValueError）。
-既定の入力は4県（静岡・愛知・岐阜・三重）を含む抽出 data/raw/naikaku_tokai/tokai_{Eq,Liq}_<case>.csv.gz。
+既定の入力は5県（静岡・愛知・岐阜・三重・和歌山）を含む抽出 data/raw/naikaku_tokai/tokai_{Eq,Liq}_<case>.csv.gz と、
+和歌山県の東経135度より西（1次メッシュ 5034・5134）の抽出 data/raw/naikaku_tokai/w34_{Eq,Liq}_<case>.csv.gz（ケースごとに両方を読む）。
 
 出力先: 公開するケース（L2・HALF_E・HALF_W）は public/data/hazard、照合用（L2_RIKU・L2_KIHON）は build/hazard-reconcile。
-対応範囲は 250m メッシュ単位（Ruling F1・F4）: メッシュの四角が4県の小地域境界 data/raw/boundary/r2ka21〜24.shp の和と面積>0で重なるもの。
+対応範囲は 250m メッシュ単位（Ruling F1・F4）: メッシュの四角が5県の小地域境界 data/raw/boundary/r2ka{21,22,23,24,30}.shp の和と面積>0で重なるもの。
 建物の有無は問わない（山林も対応範囲）。統合後の建物（public/data/stock/municipality_meshes.json）が範囲内にあることも確かめる。
 
 出力: {out_dir}/{case}/{mesh2}.json = {"<mesh250>": [Ia, PL, settlementCm, None, None]}
@@ -29,9 +30,10 @@ PUBLISHED_CASES = ["L2", "HALF_E", "HALF_W"]
 RECONCILE_CASES = ["L2_RIKU", "L2_KIHON"]
 DEFAULT_STOCK = "public/data/stock/municipality_meshes.json"
 DEFAULT_BOUNDARY_DIR = "data/raw/boundary"
-COVERAGE_PREFS = ["21", "22", "23", "24"]
-DEFAULT_EQ = "data/raw/naikaku_tokai/tokai_Eq_{suffix}.csv.gz"
-DEFAULT_LIQ = "data/raw/naikaku_tokai/tokai_Liq_{suffix}.csv.gz"
+COVERAGE_PREFS = ["21", "22", "23", "24", "30"]
+# 和歌山県の西端は東経135度より西のため、1次メッシュ 5034・5134 は w34_* に別に抽出してある
+DEFAULT_EQ = ["data/raw/naikaku_tokai/tokai_Eq_{suffix}.csv.gz", "data/raw/naikaku_tokai/w34_Eq_{suffix}.csv.gz"]
+DEFAULT_LIQ = ["data/raw/naikaku_tokai/tokai_Liq_{suffix}.csv.gz", "data/raw/naikaku_tokai/w34_Liq_{suffix}.csv.gz"]
 
 
 def _open(path: Path):
@@ -197,11 +199,11 @@ def build_hazard(eq_csv, liq_csv, case: str, out_dir: Path, coverage: set[str] |
 
 def parse_args(argv=None) -> argparse.Namespace:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--eq", nargs="+", default=[DEFAULT_EQ], help="Eq CSV のパス（{suffix} がケース名 champ/2/1E/1W/1 に置き換わる）")
-    ap.add_argument("--liq", nargs="+", default=[DEFAULT_LIQ], help="Liq CSV のパス（{suffix} を含む）")
+    ap.add_argument("--eq", nargs="+", default=list(DEFAULT_EQ), help="Eq CSV のパス（{suffix} がケース名 champ/2/1E/1W/1 に置き換わる）")
+    ap.add_argument("--liq", nargs="+", default=list(DEFAULT_LIQ), help="Liq CSV のパス（{suffix} を含む）")
     ap.add_argument("--out", default="public/data/hazard", type=Path, help="公開するケース（L2・HALF_E・HALF_W）の出力")
     ap.add_argument("--reconcile-out", default="build/hazard-reconcile", type=Path, help="照合用ケース（L2_RIKU・L2_KIHON）の出力（public/ の外）")
-    ap.add_argument("--boundary-dir", default=DEFAULT_BOUNDARY_DIR, type=Path, help="対応範囲を決める r2ka21〜24.shp の場所")
+    ap.add_argument("--boundary-dir", default=DEFAULT_BOUNDARY_DIR, type=Path, help="対応範囲を決める r2ka<県コード>.shp（COVERAGE_PREFS）の場所")
     ap.add_argument("--stock", default=DEFAULT_STOCK, type=Path, help="統合後の municipality_meshes.json（建物のメッシュが対応範囲内にあるかの確認）")
     ap.add_argument("--manifest", default="public/data/manifest.json", type=Path)
     a = ap.parse_args(argv)
@@ -238,13 +240,13 @@ def main(argv=None) -> None:
         args.manifest,
         {
             "id": "naikaku-hazard",
-            "name": "南海トラフ巨大地震 メッシュ別ハザード（静岡県・愛知県・岐阜県・三重県を含む範囲）",
+            "name": "南海トラフ巨大地震 メッシュ別ハザード（静岡県・愛知県・岐阜県・三重県・和歌山県を含む範囲）",
             "source": "内閣府 南海トラフの巨大地震モデル・被害想定手法検討会 データセットA（令和7年）",
             "url": "https://www.geospatial.jp/ckan/dataset/02543200-9310-4fc0-bcbb-bb1d4ff64990",
             "publishedDate": "令和7年",
             "license": "加工物は頒布可・元データの再配布禁止・出典明記",
             "processedDate": date.today().isoformat(),
-            "notes": "1次メッシュ 緯度コード50〜54 × 経度コード35〜39（静岡県・愛知県・岐阜県・三重県を含む）の抽出を使用。複数ファイルに同じメッシュがあれば値の一致を確認。Ia（参考震度）<0 のメッシュは除外。液状化は PL・沈下量(cm)、対象外は null。津波項目は null。ケース: L2=champ（ケース1〜5と経験的手法の最大値）, L2_RIKU=ケース2（陸側ケース。県・内閣府の公表値と比較する基準）, HALF_E=1E, HALF_W=1W, L2_KIHON=ケース1（基本ケース。岐阜県・静岡県の基本ケースの公表値と比較する照合用。アプリは使わない）。対応範囲は250mメッシュ単位で、メッシュの四角が4県の小地域境界（国勢調査 r2ka21〜24）の和と面積>0で重なるものだけ（建物の有無は問わない。範囲内で想定値の無いメッシュは null の行。行の無いメッシュ（隣県など）は「まだ対応していません」）。公開するのは L2・HALF_E・HALF_W（public/data/hazard/）。L2_RIKU・L2_KIHON は照合用で build/hazard-reconcile/ に出力し公開しない。いずれも git 対象外。",
+            "notes": "1次メッシュ 緯度コード50〜54 × 経度コード35〜39（静岡県・愛知県・岐阜県・三重県・和歌山県の東経135度以東を含む）と、和歌山県の東経135度以西の 5034・5134 の抽出を使用。複数ファイルに同じメッシュがあれば値の一致を確認。Ia（参考震度）<0 のメッシュは除外。液状化は PL・沈下量(cm)、対象外は null。津波項目は null。ケース: L2=champ（ケース1〜5と経験的手法の最大値）, L2_RIKU=ケース2（陸側ケース。県・内閣府の公表値と比較する基準）, HALF_E=1E, HALF_W=1W, L2_KIHON=ケース1（基本ケース。岐阜県・静岡県の基本ケースの公表値と比較する照合用。アプリは使わない）。対応範囲は250mメッシュ単位で、メッシュの四角が5県の小地域境界（国勢調査 r2ka21〜24・30）の和と面積>0で重なるものだけ（建物の有無は問わない。範囲内で想定値の無いメッシュは null の行。行の無いメッシュ（隣県など）は「まだ対応していません」）。公開するのは L2・HALF_E・HALF_W（public/data/hazard/）。L2_RIKU・L2_KIHON は照合用で build/hazard-reconcile/ に出力し公開しない。いずれも git 対象外。",
         },
     )
 

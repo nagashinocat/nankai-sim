@@ -225,3 +225,75 @@ test('parseArgs: --totals-only は市町村別の公表表が無い県だけ（�
   assert.throws(() => parseArgs(['--pref', '21', '--national', '1', '--totals-only']), /--totals-only/);
   assert.doesNotThrow(() => parseArgs(['--pref', '22', '--national', '1', '--totals-only']));
 });
+
+// --- 和歌山県（30）: 公表値は「揺れ等」（液状化・震動・斜面崩壊）なので、揺れ＋液状化で比べる（Ruling W-a） ---
+import { municipalityMeshes } from '../../scripts/reconcile.ts';
+import { liquefactionRates } from '../../src/core/fragility.ts';
+import { combine } from '../../src/core/damage.ts';
+
+test('parseArgs: 和歌山（30）は 30_municipal.csv・県計 約84,700（陸側）・既定で揺れ＋液状化。--shake-only で揺れのみ', () => {
+  assert.throws(() => parseArgs(['--pref', '30']), /--national/);
+  const a = parseArgs(['--pref', '30', '--national', '84700']);
+  assert.equal(a.prefName, '和歌山県');
+  assert.equal(a.csv, 'data/published/30_municipal.csv');
+  assert.equal(a.hazardCase, 'L2_RIKU');
+  assert.equal(a.prefPublished, 84700);
+  assert.equal(a.withLiquefaction, true);
+  assert.equal(a.report, 'reports/reconcile-30-L2_RIKU-liq.md');
+  const b = parseArgs(['--pref', '30', '--national', '84700', '--shake-only']);
+  assert.equal(b.withLiquefaction, false);
+  assert.equal(b.report, 'reports/reconcile-30-L2_RIKU.md');
+  // ほかの県は従来どおり揺れのみ
+  assert.equal(parseArgs([]).withLiquefaction, false);
+  assert.equal(parseArgs(['--pref', '23', '--national', '1']).withLiquefaction, false);
+});
+
+test('和歌山の公表値 CSV は 30 市町村・合計 85,392', () => {
+  const csv = readFileSync(fileURLToPath(new URL('../../data/published/30_municipal.csv', import.meta.url)), 'utf8');
+  const rows = csv.trim().split('\n');
+  assert.equal(rows[0], 'municipality,case,shake_collapse');
+  assert.equal(rows.length - 1, 30);
+  assert.equal(rows.slice(1).reduce((a, l) => a + Number(l.split(',')[2]), 0), 85392);
+});
+
+test('computeMunicipality: withLiquefaction なら揺れと液状化（沈下量 cm）の全壊率を合成。沈下量 null は揺れのみ', () => {
+  const fx = JSON.parse(readFileSync(fileURLToPath(new URL('../fixtures/fragility.synthetic.json', import.meta.url)), 'utf8')) as FragilityTable;
+  useFragilityTable(fx);
+  const files: Record<string, unknown> = {
+    'h/L2_RIKU/523644.json': { '5236442023': [6.0, 20, 30, null, null], '5236442024': [6.0, null, null, null, null] },
+    'public/data/stock/523644.json': {
+      '5236442023': { total: 100, shares: { 'wood:pre1981': 0.5, 'steel:post2000': 0.5 } },
+      '5236442024': { total: 10, shares: { 'wood:pre1981': 1 } },
+    },
+  };
+  const reader = (p: string) => files[p];
+  const both = (s: 'wood' | 'steel', e: 'pre1981' | 'post2000') =>
+    combine([shakeRates(6.0, s, e, undefined, 'rep'), liquefactionRates(30, s, e, 'rep')]).collapse;
+  const expected = 50 * both('wood', 'pre1981') + 50 * both('steel', 'post2000') + 10 * shakeRates(6.0, 'wood', 'pre1981', undefined, 'rep').collapse;
+  const r = computeMunicipality('L2_RIKU', ['5236442023', '5236442024'], new Map(), new Map(), reader, 'h', true);
+  assert.ok(Math.abs(r.sum - expected) < 1e-9);
+  const shakeOnly = computeMunicipality('L2_RIKU', ['5236442023', '5236442024'], new Map(), new Map(), reader, 'h');
+  assert.ok(r.sum > shakeOnly.sum);
+});
+
+test('municipalityMeshes: 統合で県名付きになった同名の町村（愛知県美浜町・和歌山県美浜町）は県名付きを先に引く', () => {
+  const mm = { 愛知県美浜町: ['a'], 和歌山県美浜町: ['w'], 和歌山市: ['x'] };
+  assert.deepEqual(municipalityMeshes(mm, '美浜町', '和歌山県'), ['w']);
+  assert.deepEqual(municipalityMeshes(mm, '美浜町', '愛知県'), ['a']);
+  assert.deepEqual(municipalityMeshes(mm, '和歌山市', '和歌山県'), ['x']);
+  assert.throws(() => municipalityMeshes(mm, '美浜町', '三重県'), /美浜町/);
+});
+
+test('レポート: 揺れ＋液状化のときは見出しと前提に書き、公表値の定義の違いも載せる', () => {
+  const md = buildReport(reconcile([row(1000, 1100)]), [], {
+    prefName: '和歌山県', hazardCase: 'L2_RIKU', withLiquefaction: true,
+    definitionNote: '公表値は「揺れ等による全壊」（液状化・震動・斜面崩壊）',
+  });
+  assert.ok(md.startsWith('# 和歌山県 L2 揺れ＋液状化 全壊棟数の照合'));
+  assert.ok(md.includes('揺れ＋液状化'));
+  assert.ok(md.includes('斜面崩壊'));
+  assert.ok(!md.includes('揺れのみ（R12）'));
+  const shake = buildReport(reconcile([row(1000, 1100)]), [], { prefName: '三重県' });
+  assert.ok(shake.startsWith('# 三重県 L2 揺れ全壊棟数の照合'));
+  assert.ok(shake.includes('揺れのみ（R12）'));
+});

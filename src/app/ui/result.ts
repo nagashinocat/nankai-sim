@@ -49,7 +49,7 @@ export function renderResult(root: HTMLElement, d: ResultData): void {
   const mapNode = el('div', { id: 'result-map', class: 'map' });
   areaSection.append(el('p', { class: 'hint' }, '地図の色は、250mマスごとの全壊率の推計です。'), mapNode, legendElement(), tsunamiLegendElement(), tsunamiCaption());
 
-  // 対応範囲外（隣県など）では避難場所を出さない。4県のデータだけの一覧は、その場所の避難場所が欠けて向きを誤らせる（Ruling F1）。
+  // 対応範囲外（隣県など）では避難場所を出さない。5県のデータだけの一覧は、その場所の避難場所が欠けて向きを誤らせる（Ruling F1）。
   const outside = h.status === 'outside';
   const evacSection = outside ? null : el('section', { class: 'card', id: 'evac' }, el('h2', {}, '避難できる場所'), ...shelterListNodes(d.evac));
   const mapShelters = outside ? [] : d.evacShelters[0] ?? [];

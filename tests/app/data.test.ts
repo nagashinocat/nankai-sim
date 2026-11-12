@@ -16,7 +16,7 @@ function fake(files: Record<string, unknown>) {
 const H = '/data/hazard/L2';
 const hazardFiles = {
   [`${H}/index.json`]: ['523644', '523645'],
-  // 5236442026 = 4県内だが想定値が無い（全項目 null の行）。行の無い 5236449999 は4県外（隣県）
+  // 5236442026 = 5県内だが想定値が無い（全項目 null の行）。行の無い 5236449999 は5県外（隣県）
   [`${H}/523644.json`]: { '5236442023': [6.5, 12.3, 4.5, 2.1, 25], '5236442024': [5.0, null, null, null, null], '5236442026': [null, null, null, null, null] },
   [`${H}/523645.json`]: { '5236452011': [6.0, 1, 2, 3, 4] },
 };
@@ -42,7 +42,7 @@ test('covers: 250m メッシュ単位（Ruling F1）。index.json にあり、�
   const ds = createDataSource(fake(hazardFiles).fetcher);
   assert.equal(await ds.covers('L2', '5236442023'), true);
   assert.equal(await ds.covers('L2', '5236452011'), true);
-  assert.equal(await ds.covers('L2', '5236442026'), true); // 4県内・想定値なし
+  assert.equal(await ds.covers('L2', '5236442026'), true); // 5県内・想定値なし
   assert.equal(await ds.covers('L2', '5236449999'), false); // 同じ2次メッシュの隣県のメッシュ
   assert.equal(await ds.covers('L2', '5300001111'), false);
 });
@@ -74,12 +74,12 @@ test('hazardCell: 失敗は覚えず、再試行で取り直す', async () => {
   assert.equal(calls.filter((c) => c.endsWith('/523644.json')).length, 2);
 });
 
-test('hazardCell: ファイルはあるがメッシュの行が無い（4県外の隣県のメッシュ）→ outside（Ruling F1）', async () => {
+test('hazardCell: ファイルはあるがメッシュの行が無い（5県外の隣県のメッシュ）→ outside（Ruling F1）', async () => {
   const ds = createDataSource(fake(hazardFiles).fetcher);
   assert.equal(await ds.hazardCell('L2', '5236449999'), 'outside');
 });
 
-test('hazardCell: 4県内で想定値の無いメッシュ（全項目 null の行）→ null（データなし。outside とは別）', async () => {
+test('hazardCell: 5県内で想定値の無いメッシュ（全項目 null の行）→ null（データなし。outside とは別）', async () => {
   const ds = createDataSource(fake(hazardFiles).fetcher);
   assert.equal(await ds.hazardCell('L2', '5236442026'), null);
 });

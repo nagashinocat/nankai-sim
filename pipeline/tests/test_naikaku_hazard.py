@@ -86,7 +86,7 @@ def test_coverage_index_lists_written_mesh2(tmp_path):
     assert index == sorted(p.stem for p in d.glob("??????.json"))
 
 
-# --- 複数ファイル・gzip（4県の抽出） ---
+# --- 複数ファイル・gzip（5県の抽出） ---
 import gzip
 
 import pytest
@@ -171,8 +171,9 @@ def test_negative_ia_mismatch_also_checked(tmp_path):
 
 def test_cli_defaults_read_tokai_gz_and_accept_several():
     a = parse_args([])
-    assert a.eq == ["data/raw/naikaku_tokai/tokai_Eq_{suffix}.csv.gz"]
-    assert a.liq == ["data/raw/naikaku_tokai/tokai_Liq_{suffix}.csv.gz"]
+    # 和歌山県の西端は東経135度より西のため、1次メッシュ 5034・5134 を別に抽出した w34_* も読む
+    assert a.eq == ["data/raw/naikaku_tokai/tokai_Eq_{suffix}.csv.gz", "data/raw/naikaku_tokai/w34_Eq_{suffix}.csv.gz"]
+    assert a.liq == ["data/raw/naikaku_tokai/tokai_Liq_{suffix}.csv.gz", "data/raw/naikaku_tokai/w34_Liq_{suffix}.csv.gz"]
     assert a.out == Path("public/data/hazard")
     assert a.reconcile_out == Path("build/hazard-reconcile")
     assert a.boundary_dir == Path("data/raw/boundary")
@@ -187,7 +188,7 @@ def test_cli_template_without_suffix_rejected():
         parse_args(["--eq", "plain.csv"])
 
 
-# --- Ruling F1/F4: 対応範囲は 250m メッシュ単位（四角が4県の境界 r2ka21〜24 の和と面積>0で重なる）。照合用ケースは public/ の外 ---
+# --- Ruling F1/F4: 対応範囲は 250m メッシュ単位（四角が5県の境界 r2ka21〜24・30 の和と面積>0で重なる）。照合用ケースは public/ の外 ---
 from pipeline.building_stock import mesh_center  # noqa: E402
 from pipeline.naikaku_hazard import (  # noqa: E402
     PUBLISHED_CASES,
@@ -264,7 +265,7 @@ def test_coverage_from_boundaries_is_union_of_prefectures(tmp_path):
 
 
 def test_coverage_limits_rows_per_250m_mesh(tmp_path):
-    # 5236442023/24 は4県内、5236442025 は同じ2次メッシュだが4県外（隣県）、5235350011 は4県外の2次メッシュ
+    # 5236442023/24 は5県内、5236442025 は同じ2次メッシュだが5県外（隣県）、5235350011 は5県外の2次メッシュ
     eq = write(tmp_path / "e.csv", EQ_HEAD, [eq_row("5236442023", 5.5), eq_row("5236442024", 5.0), eq_row("5236442025", 6.8), eq_row("5235350011", 6.0)])
     liq = write(tmp_path / "l.csv", LIQ_HEAD, [])
     n = build_hazard([eq], [liq], "L2", tmp_path / "out", coverage={"5236442023", "5236442024"})
@@ -272,13 +273,13 @@ def test_coverage_limits_rows_per_250m_mesh(tmp_path):
     d = tmp_path / "out" / "L2"
     assert json.loads((d / "index.json").read_text()) == ["523644"]
     assert not (d / "523535.json").exists()
-    # 同じ2次メッシュでも4県外の 250m メッシュの行は書かない（アプリは行が無いメッシュを「まだ対応していません」）
+    # 同じ2次メッシュでも5県外の 250m メッシュの行は書かない（アプリは行が無いメッシュを「まだ対応していません」）
     assert set(json.loads((d / "523644.json").read_text())) == {"5236442023", "5236442024"}
 
 
 def test_covered_mesh_without_hazard_gets_null_row(tmp_path):
-    # 4県内なのに想定値が無い（Ia<0 または行が無い）→ 全項目 null の行（アプリは「この場所のデータなし」）。
-    # 4県内のメッシュだけの2次メッシュ（533600）も index.json に入る。
+    # 5県内なのに想定値が無い（Ia<0 または行が無い）→ 全項目 null の行（アプリは「この場所のデータなし」）。
+    # 5県内のメッシュだけの2次メッシュ（533600）も index.json に入る。
     eq = write(tmp_path / "e.csv", EQ_HEAD, [eq_row("5236442023", 5.5), eq_row("5236442026", -1)])
     liq = write(tmp_path / "l.csv", LIQ_HEAD, [liq_row("5236442026", 3.0, 0.1)])
     n = build_hazard([eq], [liq], "L2", tmp_path / "out", coverage={"5236442023", "5236442026", "5336001001"})
@@ -319,3 +320,9 @@ def test_stale_reconcile_cases_removed_from_public(tmp_path):
         (pub / c / "index.json").write_text("[]")
     assert remove_unpublished_cases(pub) == ["L2_KIHON", "L2_RIKU"]
     assert sorted(p.name for p in pub.iterdir()) == ["L2"]
+
+
+def test_coverage_prefs_include_wakayama():
+    from pipeline.naikaku_hazard import COVERAGE_PREFS
+
+    assert COVERAGE_PREFS == ["21", "22", "23", "24", "30"]
