@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>けっか（こどもモード）</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1f4fa8}a:hover{color:#163a7d}
+rt{font-size:0.5em;font-weight:500}
+</style>
+</helmet>
+<div style="width: 390px; min-height: 1640px; box-sizing: border-box; background: #FFF8EC; font-family: 'Zen Maru Gothic', sans-serif; color: #1F2A44; padding: 16px 16px 32px; display: flex; flex-direction: column; gap: 16px">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
+    <div style="font-size: 15px; font-weight: 700; line-height: 1.4">なんかいトラフ<br>じしんの そなえ</div>
+    <div role="group" aria-label="ひょうじの きりかえ" style="display: flex; background: #EADFCB; border-radius: 999px; padding: 4px; gap: 4px">
+      <button type="button" aria-pressed="true" style="font-family: inherit; font-size: 15px; font-weight: 700; border: 0; border-radius: 999px; padding: 10px 16px; min-height: 44px; background: #2F6FDB; color: #FFFFFF">こども</button>
+      <button type="button" aria-pressed="false" style="font-family: inherit; font-size: 15px; font-weight: 700; border: 0; border-radius: 999px; padding: 10px 16px; min-height: 44px; background: transparent; color: #1F2A44">おとな</button>
+    </div>
+  </div>
+
+  <div style="background: #FFFFFF; border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 6px; border: 2px solid #EADFCB">
+    <div style="font-size: 14px; color: #5A6377">れい：<ruby>三重県<rt>みえけん</rt></ruby> <ruby>尾鷲市<rt>おわせし</rt></ruby>の あたり</div>
+    <div style="font-size: 22px; font-weight: 900; line-height: 1.5">もし おおきな じしんが きたら…</div>
+  </div>
+
+  <section style="background: #FFFFFF; border-radius: 20px; padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; border: 2px solid #EADFCB">
+    <h2 style="margin: 0; font-size: 20px; font-weight: 900">1. ゆれの つよさ</h2>
+    <div style="display: flex; align-items: center; gap: 16px">
+      <svg width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="こまった かおの マーク">
+        <circle cx="48" cy="48" r="44" fill="#D9381E"></circle>
+        <circle cx="34" cy="40" r="5" fill="#FFFFFF"></circle>
+        <circle cx="62" cy="40" r="5" fill="#FFFFFF"></circle>
+        <path d="M30 66 Q48 52 66 66" stroke="#FFFFFF" stroke-width="5" fill="none" stroke-linecap="round"></path>
+        <path d="M24 26 L36 32 M72 26 L60 32" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round"></path>
+      </svg>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <div style="font-size: 30px; font-weight: 900; color: #B3261E"><ruby>震度<rt>しんど</rt></ruby> 6<ruby>強<rt>きょう</rt></ruby></div>
+        <div style="font-size: 17px; font-weight: 700; line-height: 1.5">たって いられない。<br>はって うごくのも むずかしい</div>
+      </div>
+    </div>
+    <div aria-label="ゆれメーター：7だんかいの 6ばんめ" role="img" style="display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 4px">
+      <div style="height: 14px; border-radius: 7px; background: #DCE6F2"></div>
+      <div style="height: 14px; border-radius: 7px; background: #DCE6F2"></div>
+      <div style="height: 14px; border-radius: 7px; background: #FFE680"></div>
+      <div style="height: 14px; border-radius: 7px; background: #FFD84D"></div>
+      <div style="height: 14px; border-radius: 7px; background: #F39C3D"></div>
+      <div style="height: 14px; border-radius: 7px; background: #D9381E; outline: 3px solid #1F2A44; outline-offset: 2px"></div>
+      <div style="height: 14px; border-radius: 7px; background: #E6D3E6"></div>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #5A6377"><span>よわい</span><span>つよい</span></div>
+  </section>
+
+  <section style="background: #FFFFFF; border-radius: 20px; padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; border: 2px solid #EADFCB">
+    <h2 style="margin: 0; font-size: 20px; font-weight: 900">2. いえは どうなる？</h2>
+    <div style="font-size: 17px; font-weight: 700; line-height: 1.5">おなじような いえが 10けん あったら…</div>
+    <div role="img" aria-label="10けんのうち こわれる いえ 6けん、かたむく いえ 3けん、だいじょうぶそう 1けん" style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
+      <sc-for list="{{houses}}" as="h" hint-placeholder-count="10">
+        <svg width="56" height="52" viewBox="0 0 56 52" aria-hidden="true" style="width: 100%; height: auto">
+          <path d="M4 24 L28 4 L52 24 Z" fill="{{h.roof}}"></path>
+          <rect x="10" y="24" width="36" height="26" rx="3" fill="{{h.wall}}"></rect>
+          <rect x="23" y="34" width="10" height="16" rx="2" fill="#FFFFFF"></rect>
+        </svg>
+      </sc-for>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px; font-size: 16px; font-weight: 700">
+      <div style="display: flex; align-items: center; gap: 8px"><span style="width: 18px; height: 18px; border-radius: 4px; background: #B3261E"></span>こわれて すめなくなる … 6けんくらい</div>
+      <div style="display: flex; align-items: center; gap: 8px"><span style="width: 18px; height: 18px; border-radius: 4px; background: #F0A040"></span>かたむいたり ひびが はいる … 3けんくらい</div>
+      <div style="display: flex; align-items: center; gap: 8px"><span style="width: 18px; height: 18px; border-radius: 4px; background: #C9CFD8"></span>のこり（すこしは こわれるかも）</div>
+    </div>
+    <div style="background: #EEF4FD; border-radius: 12px; padding: 12px; font-size: 15px; line-height: 1.6">じょうぶな いえに すると、こわれる いえは へらせます。おうちの ひとと はなして みよう。</div>
+  </section>
+
+  <section style="background: #FFFFFF; border-radius: 20px; padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; border: 2px solid #EADFCB">
+    <h2 style="margin: 0; font-size: 20px; font-weight: 900">3. つなみ</h2>
+    <svg width="358" height="200" viewBox="0 0 358 200" role="img" aria-label="ちかくの みずの ふかさは 1から3メートル。おとなの せたけより ふかい ことが ある">
+      <rect x="0" y="0" width="358" height="200" rx="14" fill="#F3F8FF"></rect>
+      <rect x="0" y="92" width="358" height="88" fill="#7FB8EA" opacity="0.35"></rect>
+      <rect x="0" y="122" width="358" height="58" fill="#4BA3E3" opacity="0.75"></rect>
+      <path d="M0 122 Q22 112 44 122 T88 122 T132 122 T176 122 T220 122 T264 122 T308 122 T352 122" stroke="#2C7FC4" stroke-width="3" fill="none"></path>
+      <line x1="0" y1="180" x2="358" y2="180" stroke="#6B5B4B" stroke-width="4"></line>
+      <circle cx="60" cy="130" r="8" fill="#1F2A44"></circle>
+      <rect x="53" y="139" width="14" height="41" rx="6" fill="#1F2A44"></rect>
+      <text x="76" y="140" font-size="13" font-family="Zen Maru Gothic, sans-serif" font-weight="700" fill="#1F2A44">きみ（1.3m）</text>
+      <circle cx="170" cy="106" r="9" fill="#1F2A44"></circle>
+      <rect x="162" y="116" width="16" height="64" rx="7" fill="#1F2A44"></rect>
+      <text x="186" y="112" font-size="13" font-family="Zen Maru Gothic, sans-serif" font-weight="700" fill="#1F2A44">おとな（1.7m）</text>
+      <path d="M262 76 L304 44 L346 76 Z" fill="#8B6F5A"></path>
+      <rect x="270" y="76" width="68" height="104" fill="#FFFFFF" stroke="#8B6F5A" stroke-width="3"></rect>
+      <line x1="270" y1="128" x2="338" y2="128" stroke="#8B6F5A" stroke-width="2"></line>
+      <text x="296" y="110" font-size="13" font-family="Zen Maru Gothic, sans-serif" font-weight="700" fill="#1F2A44">2かい</text>
+      <text x="296" y="160" font-size="13" font-family="Zen Maru Gothic, sans-serif" font-weight="700" fill="#1F2A44">1かい</text>
+      <text x="12" y="24" font-size="14" font-family="Zen Maru Gothic, sans-serif" font-weight="700" fill="#1F4FA8">うすい あお＝ここまで くるかも</text>
+    </svg>
+    <div style="font-size: 18px; font-weight: 900; line-height: 1.5">いえの ちかくまで みずが くる かも。<br>おとなの せたけより ふかい ことも。</div>
+    <div style="display: flex; align-items: center; gap: 12px; background: #FFF1D6; border-radius: 14px; padding: 12px">
+      <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+        <circle cx="22" cy="22" r="19" fill="none" stroke="#1F2A44" stroke-width="3"></circle>
+        <path d="M22 11 L22 22 L30 27" stroke="#1F2A44" stroke-width="3" fill="none" stroke-linecap="round"></path>
+      </svg>
+      <div style="font-size: 16px; font-weight: 700; line-height: 1.5">はやいと <span style="font-size: 22px; font-weight: 900">3ぷん</span>で うみに つく。<br>まって いたら まにあわない！</div>
+    </div>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 12px">
+    <h2 style="margin: 0; font-size: 22px; font-weight: 900">じしんの とき、こうする！</h2>
+    <div style="background: #FFFFFF; border-radius: 20px; padding: 16px; display: flex; align-items: center; gap: 14px; border: 3px solid #2F6FDB">
+      <div style="flex: none; width: 64px; height: 64px; border-radius: 16px; background: #E4EEFC; display: flex; align-items: center; justify-content: center">
+        <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M6 18 L22 8 L38 18" stroke="#2F6FDB" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+          <circle cx="22" cy="24" r="6" fill="#2F6FDB"></circle>
+          <path d="M12 40 Q22 28 32 40" fill="#2F6FDB"></path>
+        </svg>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div style="font-size: 14px; font-weight: 700; color: #2F6FDB">ゆれて いる とき</div>
+        <div style="font-size: 20px; font-weight: 900">あたまを まもる</div>
+        <div style="font-size: 14px; line-height: 1.5">ひくく なって、つくえの したや ものが おちて こない ところへ</div>
+      </div>
+    </div>
+    <div style="background: #FFFFFF; border-radius: 20px; padding: 16px; display: flex; align-items: center; gap: 14px; border: 3px solid #D9381E">
+      <div style="flex: none; width: 64px; height: 64px; border-radius: 16px; background: #FCE7E3; display: flex; align-items: center; justify-content: center">
+        <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+          <path d="M4 40 L18 22 L26 30 L40 8" stroke="#D9381E" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+          <path d="M30 8 L40 8 L40 18" stroke="#D9381E" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
+        </svg>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div style="font-size: 14px; font-weight: 700; color: #B3261E">ゆれが とまったら すぐ</div>
+        <div style="font-size: 20px; font-weight: 900">たかい ところへ にげる</div>
+        <div style="font-size: 14px; line-height: 1.5">にもつは もたなくて いい。もどらない。</div>
+      </div>
+    </div>
+    <div style="background: #FFFFFF; border-radius: 20px; padding: 16px; display: flex; align-items: center; gap: 14px; border: 3px solid #1B8A5A">
+      <div style="flex: none; width: 64px; height: 64px; border-radius: 16px; background: #E1F4EA; display: flex; align-items: center; justify-content: center">
+        <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+          <circle cx="14" cy="14" r="6" fill="#1B8A5A"></circle>
+          <circle cx="30" cy="14" r="6" fill="#1B8A5A"></circle>
+          <path d="M4 38 Q14 22 24 38 M20 38 Q30 22 40 38" fill="#1B8A5A"></path>
+        </svg>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div style="font-size: 14px; font-weight: 700; color: #1B8A5A">にげた あと</div>
+        <div style="font-size: 20px; font-weight: 900">きめた ばしょで あう</div>
+        <div style="font-size: 14px; line-height: 1.5">かぞくと きめた ばしょで まつ</div>
+      </div>
+    </div>
+  </section>
+
+  <a href="Replay.dc.html" style="display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 56px; border-radius: 18px; background: #2F6FDB; color: #FFFFFF; font-size: 19px; font-weight: 900; text-decoration: none">
+    <svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><path d="M6 3 L19 11 L6 19 Z" fill="#FFFFFF"></path></svg>
+    うごきで みて みよう
+  </a>
+  <a href="Family.dc.html" style="display: flex; align-items: center; justify-content: center; min-height: 52px; border-radius: 18px; background: #FFFFFF; color: #1F2A44; border: 2px solid #1F2A44; font-size: 18px; font-weight: 900; text-decoration: none">かぞくの きまりを みる</a>
+
+  <div style="font-size: 14px; line-height: 1.6; color: #3E4658; text-align: center">しって いれば、まもれる。<br>おうちの ひとと いっしょに みてね。</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":1640}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var houses = [];
+    for (var i = 0; i < 10; i++) {
+      var kind = i < 6 ? 'collapse' : i < 9 ? 'half' : 'ok';
+      houses.push({
+        roof: kind === 'collapse' ? '#8C1D18' : kind === 'half' ? '#C77A1E' : '#9AA3B0',
+        wall: kind === 'collapse' ? '#B3261E' : kind === 'half' ? '#F0A040' : '#C9CFD8'
+      });
+    }
+    return { houses: houses };
+  }
+}
+</script>
+</body>
+</html>

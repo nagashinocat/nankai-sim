@@ -1,0 +1,18 @@
+import { chromium } from '@playwright/test';
+import { spawn } from 'node:child_process';
+const srv = spawn('python3', ['-m', 'http.server', '5290', '-d', 'dist-demo'], { stdio: 'ignore' });
+await new Promise((r) => setTimeout(r, 800));
+const b = await chromium.launch({ executablePath: '/usr/bin/google-chrome' });
+const p = await b.newPage({ viewport: { width: 390, height: 844 } });
+const errs = []; p.on('pageerror', (e) => errs.push(String(e)));
+await p.route('**/*', (r) => r.request().url().startsWith('http://localhost:5290/') ? r.continue() : r.abort());
+await p.goto('http://localhost:5290/index.html');
+await p.getByRole('button', { name: 'こども' }).first().click();
+await p.getByLabel('住所').fill('尾鷲');
+await p.getByLabel('建築年').selectOption('pre1981');
+await p.getByLabel('構造').selectOption('wood');
+await p.getByRole('button', { name: '調べる' }).click();
+await p.waitForTimeout(2500);
+await p.screenshot({ path: 'demo/kids-result.png', fullPage: true });
+console.log('errors', errs);
+await b.close(); srv.kill();
