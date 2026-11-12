@@ -15,7 +15,9 @@ export type RangeVM = { min: string; max: string; central: string };
 export type TsunamiVM =
   | { kind: 'band' | 'nearby'; depth: string; arrival: string | null; urgent: boolean;
       /** 到達時間の高さが 30cm より高いときの注意（Ruling W-d）。無ければ省く（以前の保存にも無い） */
-      arrivalCaveat?: string }
+      arrivalCaveat?: string;
+      /** 段階の代表値（m）と到達時間（分）。homeTsunamiVM（画面の絵・まとめ用）だけが持つ。保存する自宅の結果には入れない */
+      mid?: number; arrivalMin?: number | null }
   | { kind: 'none' }
   | { kind: 'unknown' };
 /** 時間差の1段階（先発、後発まで含めた合計）。 */
@@ -149,7 +151,10 @@ function tsunamiVMOf(tsunami: HomeTsunami, band: TsunamiBand | null, arrival: Ar
 /** 自宅の場所の津波（どのタブでも同じ）。自宅の計算結果が無いタブ（データなし・読み込み失敗・読み込み中）でも津波の行を出すために使う。 */
 export function homeTsunamiVM(tsunami: HomeTsunami, arrival: Arrival | null): TsunamiVM {
   const band: TsunamiBand | null = typeof tsunami !== 'object' ? null : 'nearby' in tsunami ? tsunami.nearby : tsunami;
-  return tsunamiVMOf(tsunami, band, arrival);
+  const vm = tsunamiVMOf(tsunami, band, arrival);
+  if (!band || (vm.kind !== 'band' && vm.kind !== 'nearby')) return vm;
+  const min = arrival?.min ?? null;
+  return { ...vm, mid: band.mid, arrivalMin: min !== null && Number.isFinite(min) ? min : null };
 }
 
 export const LAG_TOTAL_LABEL = '後発まで含めた合計';

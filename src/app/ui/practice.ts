@@ -1,5 +1,6 @@
 import { PRACTICE_NOTICE, PRACTICE_SOURCES, PRACTICE_TITLE, SCENES, summaryLines, type PracticeHome } from '../practice/scenes.ts';
 import { el } from './dom.ts';
+import { FAMILY_LINK_PRACTICE } from './family.ts';
 
 export type PracticeOpts = { home: PracticeHome | null; onExit: () => void };
 
@@ -70,6 +71,7 @@ export function renderPractice(root: HTMLElement, opts: PracticeOpts): void {
       again.addEventListener('click', restart);
       nodes.push(again, exit);
     }
+    nodes.push(el('a', { href: '#family', class: 'btn-link', id: 'family-entry-practice' }, FAMILY_LINK_PRACTICE));
     root.replaceChildren(...nodes);
     if (!justAnswered) { (done ? head : root.querySelector<HTMLElement>('#practice-scene h3') ?? head).focus({ preventScroll: true }); window.scrollTo(0, 0); }
   };

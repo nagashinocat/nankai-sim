@@ -4,6 +4,7 @@ import { CASE_NAME, TSUNAMI_SCENARIO_NOTE } from '../text.ts';
 import { clear, el } from './dom.ts';
 import { homeTsunamiNodes, shelterListNodes, tsunamiNotice } from './shelters.ts';
 import { damageNodes } from './stages.ts';
+import { headingIcon, tsunamiPicture } from './visuals.ts';
 
 export function formatSavedAt(iso: string): string {
   const d = new Date(iso);
@@ -17,14 +18,15 @@ export function renderLast(root: HTMLElement, s: Saved, opts: { online: boolean;
   clear(root);
   const h = s.home;
   // 保存されるのは結果が出たとき（status 'ok'）だけ。
-  const home = el('div', {}, el('h3', {}, '自宅'),
+  const pic = tsunamiPicture(h.tsunami);
+  const home = el('div', {}, el('h3', {}, headingIcon('🏠'), '自宅'),
     ...damageNodes(h),
-    ...(h.liquefaction ? [el('p', {}, h.liquefaction)] : []), ...homeTsunamiNodes(h.tsunami), ...(s.scenario !== 'L2' ? [el('p', { class: 'note tsunami-scenario-note' }, TSUNAMI_SCENARIO_NOTE)] : []), ...h.notes.map((n) => el('p', { class: 'note' }, n)));
-  const area = el('div', {}, el('h3', {}, '周辺1km（推計）'),
+    ...(h.liquefaction ? [el('p', {}, h.liquefaction)] : []), ...homeTsunamiNodes(h.tsunami), ...(pic ? [pic] : []), ...(s.scenario !== 'L2' ? [el('p', { class: 'note tsunami-scenario-note' }, TSUNAMI_SCENARIO_NOTE)] : []), ...h.notes.map((n) => el('p', { class: 'note' }, n)));
+  const area = el('div', {}, el('h3', {}, headingIcon('🗺️'), '周辺1km（推計）'),
     s.area.status === 'ok'
       ? el('p', {}, `全壊 約${s.area.collapse.toLocaleString()}棟、半壊 約${s.area.half.toLocaleString()}棟（推計）`)
       : el('p', {}, s.area.status === 'unavailable' ? '推計できませんでした' : '建物データなし'));
-  const evac = el('div', { id: 'last-evac' }, el('h3', {}, '避難できる場所'), ...shelterListNodes(s.shelters));
+  const evac = el('div', { id: 'last-evac' }, el('h3', {}, headingIcon('🏃'), '避難できる場所'), ...shelterListNodes(s.shelters));
   const del = el('button', { type: 'button', class: 'secondary' }, '前回の結果を削除');
   del.addEventListener('click', opts.onDelete);
   root.append(

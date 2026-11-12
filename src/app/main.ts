@@ -17,7 +17,11 @@ import { renderInput } from './ui/input.ts';
 import { renderResult } from './ui/result.ts';
 import { renderAbout } from './ui/about.ts';
 import { renderPractice } from './ui/practice.ts';
+import { FAMILY_ENTRY, flushFamily, renderFamily, type FamilyShelters } from './ui/family.ts';
 import { isUrgentTsunami, type PracticeHome } from './practice/scenes.ts';
+import { KIDS_TEXT, loadKids, saveKids } from './kids.ts';
+import { modeToggle, renderFamilyKids } from './ui/kids.ts';
+import type { ResultHandle } from './ui/result.ts';
 
 useFragilityTable(fragility as never);
 
@@ -32,12 +36,42 @@ const inputRoot = el('div', { id: 'input' });
 const resultRoot = el('div', { id: 'result', 'aria-live': 'polite' });
 const aboutRoot = el('div', { id: 'about', hidden: true });
 const practiceRoot = el('div', { id: 'practice', hidden: true });
-const mainView = el('div', { id: 'main-view' }, inputRoot, resultRoot);
+const familyRoot = el('div', { id: 'family', hidden: true });
+const kidsInputNote = el('p', { class: 'kid-input-note', id: 'kids-input-note', hidden: true }, KIDS_TEXT.inputNote);
+const mainView = el('div', { id: 'main-view' }, kidsInputNote, inputRoot, resultRoot);
+
+// ---- こども / おとな（表示だけ。計算・保存・共有の文面は同じ）------------------------
+let kids = loadKids(localStore());
+let resultHandle: ResultHandle | null = null;
+const toggle = modeToggle(kids, (on) => setKids(on));
+const titleNode = el('h1', {});
+const headerNote = el('div', { class: 'disclaimer', id: 'header-disclaimer' });
+function drawHeader(): void {
+  document.body.classList.toggle('kids', kids);
+  toggle.set(kids);
+  titleNode.textContent = kids ? KIDS_TEXT.title : '南海トラフ 住まいの被害シミュレーター';
+  headerNote.replaceChildren(...(kids ? [el('strong', {}, KIDS_TEXT.disclaimer)] : [el('strong', {}, DISCLAIMER), el('p', {}, DISCLAIMER_DETAIL)]));
+  kidsInputNote.hidden = !kids;
+}
+function setKids(on: boolean): void {
+  if (on === kids) return;
+  kids = on;
+  saveKids(localStore(), on);
+  drawHeader();
+  // 切り替えで結果の全体を読み上げなおさない（描きなおす間だけ aria-live を止める）
+  resultRoot.setAttribute('aria-live', 'off');
+  resultHandle?.setKids(on);
+  setTimeout(() => resultRoot.setAttribute('aria-live', 'polite'), 500);
+  if (location.hash === '#family') void showRoute();
+}
+drawHeader();
+
 app.append(
-  el('header', {}, el('h1', {}, '南海トラフ 住まいの被害シミュレーター'),
-    el('div', { class: 'disclaimer' }, el('strong', {}, DISCLAIMER), el('p', {}, DISCLAIMER_DETAIL))),
-  mainView, aboutRoot, practiceRoot,
-  el('footer', {}, el('a', { href: '#about' }, 'このアプリについて（計算方法・出典・プライバシー）')),
+  el('header', {}, el('div', { class: 'header-top' }, titleNode, toggle.node), headerNote),
+  mainView, aboutRoot, practiceRoot, familyRoot,
+  el('footer', {},
+    el('p', {}, el('a', { href: '#about' }, 'このアプリについて（計算方法・出典・プライバシー）')),
+    el('p', {}, el('a', { href: '#family', id: 'family-footer-link' }, FAMILY_ENTRY))),
 );
 
 // ---- 前回の結果（端末内 localStorage のみ。住所・座標は保存しない）-----------------
@@ -93,10 +127,14 @@ async function municipalityAround(pos: LatLon, mesh: string): Promise<string | n
 const runner = createScenarioRunner(ds);
 /** 画面に出している結果の津波の状況（練習モードの一言用）。住所・座標は持たない。結果が無ければ null。 */
 let practiceHome: PracticeHome | null = null;
+/** 家族の決まりで選べる近くの避難場所（名前と徒歩の目安だけ。座標・住所は持たない）。結果が無ければ null。 */
+let familyShelters: FamilyShelters | null = null;
 
 async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise<void> {
   runner.invalidate(); // 前の場所のタブの計算が、あとから新しい結果に混ざらないように
   practiceHome = null;
+  resultHandle = null;
+  familyShelters = null;
   clear(resultRoot); // 読み込みに失敗したとき、前の場所の結果を残さない
   const mesh = latLonToMesh250(pos);
   await ds.hazardCell('L2', mesh); // 先に読み込みの失敗を出す（computeScenario が同じ値を使う）
@@ -148,16 +186,20 @@ async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise
     urgentTsunami: isUrgentTsunami(tsunamiVM.kind, arrival?.min ?? null),
     tsunamiUnknown: tsunamiVM.kind === 'unknown',
   };
+  const walkList = (h: 'earthquake' | 'tsunami') => (evac.find((e) => e.hazard === h)?.items ?? []).slice(0, 5).map((i) => ({ name: i.name, walk: i.walkStandard }));
+  familyShelters = { tsunami: walkList('tsunami'), quake: walkList('earthquake') };
   let handle: ReturnType<typeof renderResult>;
   try {
   handle = renderResult(resultRoot, {
-    pos, municipality, result: l2, evac, evacShelters, locationNote: locationNote(where), tsunami: homeTsunamiVM(homeTsunami, arrival),
+    pos, municipality, result: l2, evac, evacShelters, locationNote: locationNote(where), tsunami: homeTsunamiVM(homeTsunami, arrival), kids,
   }, {
     onSelect: (s) => void show(s),
     onRetry: (s) => void show(s),
     onShown: (r) => onResultShown(home, municipality, evac, r),
+    onAdult: () => setKids(false),
   });
-  } catch (e) { practiceHome = null; throw e; }
+  resultHandle = handle;
+  } catch (e) { practiceHome = null; familyShelters = null; throw e; }
   void handle;
 }
 
@@ -207,9 +249,22 @@ async function guarded(fn: () => Promise<void>): Promise<void> {
 async function showRoute(): Promise<void> {
   const about = location.hash === '#about';
   const practice = location.hash === '#practice';
-  mainView.hidden = about || practice;
+  const family = location.hash === '#family';
+  if (!family) { flushFamily(); document.body.classList.remove('family-printing'); }
+  mainView.hidden = about || practice || family;
   aboutRoot.hidden = !about;
   practiceRoot.hidden = !practice;
+  familyRoot.hidden = !family;
+  if (family) {
+    if (kids) {
+      flushFamily();
+      renderFamilyKids(familyRoot, { store: localStore(), onAdult: () => setKids(false), onExit: () => { location.hash = ''; } });
+    } else {
+      renderFamily(familyRoot, { store: localStore(), shelters: familyShelters, onExit: () => { location.hash = ''; } });
+    }
+    window.scrollTo(0, 0);
+    return;
+  }
   if (practice) {
     renderPractice(practiceRoot, { home: practiceHome, onExit: () => { location.hash = ''; } });
     return;
