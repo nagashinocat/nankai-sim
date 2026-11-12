@@ -664,3 +664,104 @@ test('タブ: 読み込み中の表示は aria-live=polite', async ({ page }) =>
   await tab(page, '東側の半割れ').click();
   await expect(page.locator('#home-result [role=status]')).toHaveAttribute('aria-live', 'polite');
 });
+
+// ---- 練習モード ----
+const PRACTICE_NOTICE = 'これは練習です。臨時情報は地震の予知ではなく、発表されても実際に地震が起きるかはわかりません。実際に発表されたときは、テレビ・ラジオ・自治体の情報に従ってください';
+const BEST = [
+  'すぐ逃げられる服装で寝て、非常持出品を枕元に置く',
+  '普段どおり行くが、非常持出品を持ち歩く',
+  '避難場所と避難経路、家族との連絡方法、家具の固定、備蓄を確かめる',
+  '倒れてくる家具がない、なるべく安全な部屋',
+  '気象庁や自治体の情報を確かめ、むやみに広めない',
+  '普段の生活に戻るが、地震の可能性がなくなったわけではないので備えは続ける',
+];
+const WRONG_FIRST = ['念のため家族全員で避難所に泊まりに行く'];
+
+test('練習モード: 説明ページから入り、6問答えてまとめと出典。やり直すと点数が0に戻る。注意は常に見える', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/#about');
+  await page.getByRole('link', { name: '臨時情報が出たら？ 1週間の練習' }).click();
+  await expect(page.getByRole('heading', { name: '練習モード：南海トラフ地震臨時情報（巨大地震注意）' })).toBeVisible();
+  const notice = page.getByText(PRACTICE_NOTICE);
+  await expect(notice).toBeVisible();
+  // 1問目: 最適でないものを選ぶ → 正誤と解説
+  await page.getByRole('button', { name: WRONG_FIRST[0] }).click();
+  await expect(page.getByText('最適な行動ではありません')).toBeVisible();
+  await expect(page.getByText('巨大地震注意では事前の避難は求められません。')).toBeVisible();
+  await expect(notice).toBeVisible();
+  if (process.env.SHOT) await page.screenshot({ path: 'reports/practice-scene-390x844.png' });
+  await page.getByRole('button', { name: '次へ' }).click();
+  // 前の場面にもどる → 答えが残る
+  await page.getByRole('button', { name: '前の場面にもどる' }).click();
+  await expect(page.getByText('最適な行動ではありません')).toBeVisible();
+  await page.getByRole('button', { name: '次へ' }).click();
+  for (let i = 1; i < 6; i++) {
+    await expect(notice).toBeVisible();
+    await page.getByRole('button', { name: BEST[i] }).click();
+    await page.getByRole('button', { name: '次へ' }).click();
+  }
+  await expect(page.getByText('6問中 5問')).toBeVisible();
+  await expect(page.getByText('1週間の事前避難が求められます')).toBeVisible();
+  await expect(page.getByText('揺れへの備え')).toHaveCount(0); // 結果なし → 一行追加なし
+  await expect(page.getByText('津波の到達が早い')).toHaveCount(0);
+  await expect(page.getByRole('link', { name: /内閣府/ })).toHaveAttribute('href', 'https://www.bousai.go.jp/jishin/nankai/rinji/pdf/r8pdf03.pdf');
+  await expect(page.getByRole('link', { name: /気象庁/ })).toHaveAttribute('href', 'https://www.jma.go.jp/jma/kishou/know/jishin/nteq/info_criterion.html');
+  await expect(notice).toBeVisible();
+  if (process.env.SHOT) await page.screenshot({ path: 'reports/practice-summary-390x844.png', fullPage: true });
+  // やり直し: 点数が混ざらない（全部最適に答えると6問中 6問）
+  await page.getByRole('button', { name: '最初からやり直す' }).click();
+  for (let i = 0; i < 6; i++) {
+    await page.getByRole('button', { name: BEST[i] }).click();
+    await page.getByRole('button', { name: '次へ' }).click();
+  }
+  await expect(page.getByText('6問中 6問')).toBeVisible();
+  await page.getByRole('button', { name: '最初からやり直す' }).click();
+  await page.getByRole('button', { name: 'いつもどおりパジャマで寝る' }).click();
+  await page.getByRole('button', { name: '最初からやり直す' }).click();
+  for (let i = 0; i < 6; i++) { await page.getByRole('button', { name: BEST[i] }).click(); await page.getByRole('button', { name: '次へ' }).click(); }
+  await expect(page.getByText('6問中 6問')).toBeVisible();
+});
+
+test('練習モード: 結果画面から入り、戻っても結果が残る。津波の段階があれば事前避難の一言', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await stubTsunami(page, { rgb: [255, 216, 192] });
+  await searchKomono(page);
+  await expect(page.locator('#practice-entry')).toHaveText('臨時情報が出たら？ 1週間の練習');
+  await page.locator('#practice-entry').click();
+  await expect(page.locator('#practice-heading')).toBeVisible();
+  for (let i = 0; i < 6; i++) { await page.getByRole('button', { name: BEST[i] }).click(); await page.getByRole('button', { name: '次へ' }).click(); }
+  await expect(page.getByText('6問中 6問')).toBeVisible();
+  await expect(page.getByText('あなたの家は津波の到達が早い／浸水が想定される場所です。')).toBeVisible();
+  await page.getByRole('button', { name: '結果の画面にもどる' }).click();
+  await expect(page.locator('#home-result').getByText(/震度\d/)).toBeVisible();
+  await expect(page.locator('#practice')).toBeHidden();
+});
+
+test('練習モード: 結果の読み込みに失敗したあとは、前の結果の津波の一言を残さない', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await stubTsunami(page, { rgb: [255, 216, 192] });
+  await searchKomono(page);
+  // 別の場所（データは読み込み済みでない）で失敗させる
+  await page.unroute('**/msearch.gsi.go.jp/**');
+  await page.route('**/msearch.gsi.go.jp/**', (r) => r.fulfill({ json: [gsiHit('四日市市', YOKKAICHI.lat, YOKKAICHI.lon)] }));
+  await page.route('**/data/hazard/L2/**', (r) => r.fulfill({ status: 500, body: 'boom' }));
+  await page.getByLabel('住所').fill('四日市市');
+  await page.getByRole('button', { name: '調べる' }).click();
+  await expect(page.getByText('うまく調べられませんでした')).toBeVisible({ timeout: 30_000 });
+  await page.evaluate(() => { location.hash = '#practice'; });
+  for (let i = 0; i < 6; i++) { await page.getByRole('button', { name: BEST[i] }).click(); await page.getByRole('button', { name: '次へ' }).click(); }
+  await expect(page.getByText('6問中 6問')).toBeVisible();
+  await expect(page.getByText('津波の到達が早い')).toHaveCount(0);
+  await expect(page.getByText('揺れへの備え')).toHaveCount(0);
+  // 場面の見出しにフォーカスが移る（前の場面にもどる）
+  await page.getByRole('button', { name: '前の場面にもどる' }).click();
+  await expect(page.locator('#practice-scene h3')).toBeFocused();
+});
+
+test('練習モード: 津波なし・到達が遅い結果では揺れへの備えの一言', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page); // 菰野町は内陸（津波なし・到達時間なし）
+  await page.locator('#practice-entry').click();
+  for (let i = 0; i < 6; i++) { await page.getByRole('button', { name: BEST[i] }).click(); await page.getByRole('button', { name: '次へ' }).click(); }
+  await expect(page.getByText('揺れへの備え（家具の固定・耐震）を確かめておきましょう')).toBeVisible();
+});

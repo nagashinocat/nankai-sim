@@ -16,6 +16,8 @@ import { renderLast } from './ui/last.ts';
 import { renderInput } from './ui/input.ts';
 import { renderResult } from './ui/result.ts';
 import { renderAbout } from './ui/about.ts';
+import { renderPractice } from './ui/practice.ts';
+import { isUrgentTsunami, type PracticeHome } from './practice/scenes.ts';
 
 useFragilityTable(fragility as never);
 
@@ -29,11 +31,12 @@ const app = document.getElementById('app')!;
 const inputRoot = el('div', { id: 'input' });
 const resultRoot = el('div', { id: 'result', 'aria-live': 'polite' });
 const aboutRoot = el('div', { id: 'about', hidden: true });
+const practiceRoot = el('div', { id: 'practice', hidden: true });
 const mainView = el('div', { id: 'main-view' }, inputRoot, resultRoot);
 app.append(
   el('header', {}, el('h1', {}, '南海トラフ 住まいの被害シミュレーター'),
     el('div', { class: 'disclaimer' }, el('strong', {}, DISCLAIMER), el('p', {}, DISCLAIMER_DETAIL))),
-  mainView, aboutRoot,
+  mainView, aboutRoot, practiceRoot,
   el('footer', {}, el('a', { href: '#about' }, 'このアプリについて（計算方法・出典・プライバシー）')),
 );
 
@@ -88,9 +91,12 @@ async function municipalityAround(pos: LatLon, mesh: string): Promise<string | n
 }
 
 const runner = createScenarioRunner(ds);
+/** 画面に出している結果の津波の状況（練習モードの一言用）。住所・座標は持たない。結果が無ければ null。 */
+let practiceHome: PracticeHome | null = null;
 
 async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise<void> {
   runner.invalidate(); // 前の場所のタブの計算が、あとから新しい結果に混ざらないように
+  practiceHome = null;
   clear(resultRoot); // 読み込みに失敗したとき、前の場所の結果を残さない
   const mesh = latLonToMesh250(pos);
   await ds.hazardCell('L2', mesh); // 先に読み込みの失敗を出す（computeScenario が同じ値を使う）
@@ -136,13 +142,23 @@ async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise
     if (r.home.status !== 'error') cache.set(scenario, r);
     handle.showResult(r);
   };
-  const handle = renderResult(resultRoot, {
+  // 練習モードの一言は、結果を画面に出す直前にだけ決める（途中で失敗したときは前の結果の値を残さない）
+  const tsunamiVM = homeTsunamiVM(homeTsunami, arrival);
+  practiceHome = {
+    urgentTsunami: isUrgentTsunami(tsunamiVM.kind, arrival?.min ?? null),
+    tsunamiUnknown: tsunamiVM.kind === 'unknown',
+  };
+  let handle: ReturnType<typeof renderResult>;
+  try {
+  handle = renderResult(resultRoot, {
     pos, municipality, result: l2, evac, evacShelters, locationNote: locationNote(where), tsunami: homeTsunamiVM(homeTsunami, arrival),
   }, {
     onSelect: (s) => void show(s),
     onRetry: (s) => void show(s),
     onShown: (r) => onResultShown(home, municipality, evac, r),
   });
+  } catch (e) { practiceHome = null; throw e; }
+  void handle;
 }
 
 const view = renderInput(inputRoot, {
@@ -190,8 +206,14 @@ async function guarded(fn: () => Promise<void>): Promise<void> {
 
 async function showRoute(): Promise<void> {
   const about = location.hash === '#about';
-  mainView.hidden = about;
+  const practice = location.hash === '#practice';
+  mainView.hidden = about || practice;
   aboutRoot.hidden = !about;
+  practiceRoot.hidden = !practice;
+  if (practice) {
+    renderPractice(practiceRoot, { home: practiceHome, onExit: () => { location.hash = ''; } });
+    return;
+  }
   if (about) {
     let m: Manifest | null = null;
     try { m = await ds.manifest(); } catch { /* 出典一覧なしで表示 */ }

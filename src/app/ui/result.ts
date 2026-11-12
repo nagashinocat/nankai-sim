@@ -10,6 +10,7 @@ import { shelterListNodes, tsunamiNotice } from './shelters.ts';
 import { createResultMap, legendElement, tsunamiCaption, tsunamiLegendElement, type MeshRate } from './map.ts';
 import { renderActions, updateShare } from './actions.ts';
 import { damageNodes } from './stages.ts';
+import { PRACTICE_ENTRY } from '../practice/scenes.ts';
 
 export type ResultData = {
   pos: LatLon;
@@ -110,6 +111,7 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
     el('p', { class: 'case', id: 'case-line' }, '想定ケース：', caseName, d.municipality ? `　／　${d.municipality}` : null),
     el('p', { class: 'case', id: 'location-note' }, d.locationNote),
     tablist, panel, ...(evacSection ? [evacSection] : []), actions,
+    el('a', { href: '#practice', class: 'btn-link', id: 'practice-entry' }, PRACTICE_ENTRY),
   );
   const handle = createResultMap(mapNode, d.pos, d.result.meshRates, mapShelters);
   handle.highlightShelter(0);

@@ -1,6 +1,7 @@
 import type { Manifest } from '../data.ts';
 import { HALF_EXPLAIN, LAG_EXPLAIN, TSUNAMI_ATTRIBUTION, TSUNAMI_SCENARIO_NOTE } from '../text.ts';
 import { clear, el } from './dom.ts';
+import { PRACTICE_ENTRY } from '../practice/scenes.ts';
 
 export function renderAbout(root: HTMLElement, manifest: Manifest | null): void {
   clear(root);
@@ -22,7 +23,8 @@ export function renderAbout(root: HTMLElement, manifest: Manifest | null): void 
       el('h3', {}, '半割れ・時間差と臨時情報'),
       el('p', {}, HALF_EXPLAIN),
       el('p', {}, LAG_EXPLAIN),
-      el('p', {}, TSUNAMI_SCENARIO_NOTE)),
+      el('p', {}, TSUNAMI_SCENARIO_NOTE),
+      el('a', { href: '#practice', class: 'btn-link', id: 'practice-entry-about' }, PRACTICE_ENTRY)),
     el('section', { class: 'card' }, el('h3', {}, '出典'),
       el('p', {}, '内閣府 南海トラフの巨大地震モデル・被害想定手法検討会 ほか、次のデータを使っています。'), sources,
       el('p', {}, '地図: 国土地理院（淡色地図）。'),

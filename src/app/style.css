@@ -80,3 +80,12 @@ footer { margin-top: 24px; font-size: 1rem; }
 .stage:first-of-type { border-top: 0; }
 
 [hidden] { display: none !important; }
+
+/* 練習モード */
+.choices { display: flex; flex-direction: column; gap: 4px; }
+button.choice { background: #fff; color: inherit; text-align: left; font-weight: 400; border-color: #888; }
+button.choice[aria-disabled="true"] { cursor: default; }
+button.choice.best { border-color: #1b6b3a; background: #eaf5ee; }
+button.choice.picked:not(.best) { border-color: #b3261e; background: #fdeeee; }
+button.choice .tag { font-weight: 700; }
+#practice-heading:focus { outline: none; }

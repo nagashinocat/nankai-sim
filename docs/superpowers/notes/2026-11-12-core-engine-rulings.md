@@ -103,3 +103,7 @@ Deferred: the app still says 「海岸への到達」 for Wakayama (times are to
 ## 半割れ・時間差タブ（2026-11-12）
 Rulings: L1 the tsunami is counted once, only in the time-lag total (first stage ignores tsunami). L2 non-L2 scenario load errors other than 404 show a per-tab 'error' with retry; L2 errors still fail the whole result. L3 "total ≥ first" applies to collapse (and collapse+half); half alone may fall as half-damaged buildings become collapsed. L4 Task 3 review folded into the final review. Tsunami lines (incl. the strong evacuate line) are shown on every tab state except outside.
 Deferred: loading aria-live node re-inserted each time (announcement may be unreliable); unreachable/no-op lines in main.ts around the L2 scenario call; lag liquefaction shows the larger of the two cells.
+
+## 練習モード（2026-11-12）
+Ruling P1: when the home tsunami couldn't be determined, the practice summary says 「津波の想定を確かめられませんでした…市町村のハザードマップで確認してください」 (not the shaking-only line). Urgent line (inundation band/nearby or arrival ≤ 10 min) takes precedence.
+Active faults (J-SHIS): its terms (第5条) allow distributing edited results but forbid copying the data as-is including format conversion — same question as the Cabinet Office data; decide after the Cabinet Office reply. J-SHIS Web API has no scenario-fault intensity endpoint.
