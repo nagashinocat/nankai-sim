@@ -99,3 +99,7 @@ Deferred:
 ## 和歌山（2026-11-12）
 Rulings: W-a reconcile vs 「揺れ等」 with our shaking + liquefaction (87,002 vs 84,700 = 1.03, 20/30). W-b arrival height 1m (lowest Wakayama publishes, R8 table, ~30 m offshore). W-c only colliding municipality names are prefixed (愛知県美浜町 / 和歌山県美浜町). W-d caveat under arrival times measured at heights above 30 cm. Start map view fits all 5 prefectures (zoom 6 on phones).
 Deferred: the app still says 「海岸への到達」 for Wakayama (times are to ~30 m offshore); housing parser selection in two places.
+
+## 半割れ・時間差タブ（2026-11-12）
+Rulings: L1 the tsunami is counted once, only in the time-lag total (first stage ignores tsunami). L2 non-L2 scenario load errors other than 404 show a per-tab 'error' with retry; L2 errors still fail the whole result. L3 "total ≥ first" applies to collapse (and collapse+half); half alone may fall as half-damaged buildings become collapsed. L4 Task 3 review folded into the final review. Tsunami lines (incl. the strong evacuate line) are shown on every tab state except outside.
+Deferred: loading aria-live node re-inserted each time (announcement may be unreliable); unreachable/no-op lines in main.ts around the L2 scenario call; lag liquefaction shows the larger of the two cells.

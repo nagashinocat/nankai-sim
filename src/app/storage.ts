@@ -1,4 +1,5 @@
 import type { HomeInput } from '../core/types.ts';
+import type { Scenario } from './data.ts';
 import type { AreaVM, EvacVM, OkHomeVM } from './viewmodel.ts';
 
 /** 保存する避難場所。名前と距離・徒歩の文字列だけ（座標は持たせない）。 */
@@ -14,7 +15,9 @@ export type SavedShelterList = {
  * プライバシー: 住所の文字列・座標は含めない（型にも持たせない）。
  */
 export type Saved = {
-  v: 3; // スキーマ版。変えたら上げる（古い値は読み捨てる）。v2 で避難場所、v3 で津波（段階の文言・判定の文言）を追加
+  v: 4; // スキーマ版。変えたら上げる（古い値は読み捨てる）。v2 で避難場所、v3 で津波（段階の文言・判定の文言）、v4 で scenario（選んだタブ）を追加。v3 は L2 として読む
+  /** 選んだタブ（ケース）。ID の文字列だけ */
+  scenario: Scenario;
   savedAt: string; // ISO 8601
   municipality: string | null;
   input: HomeInput;
@@ -53,8 +56,10 @@ function validShelters(x: unknown): boolean {
     l.items.every((i) => isObj(i) && isStr(i.name) && isStr(i.distance) && isStr(i.walkStandard) && isStr(i.walkSlow) && isStr(i.reachText)));
 }
 
+const SCENARIO_IDS: readonly unknown[] = ['L2', 'HALF_E', 'HALF_W', 'LAG_EW', 'LAG_WE'];
+
 function validSaved(o: Record<string, unknown>): boolean {
-  if (o.v !== 3 || typeof o.savedAt !== 'string') return false;
+  if (o.v !== 4 || !SCENARIO_IDS.includes(o.scenario) || typeof o.savedAt !== 'string') return false;
   if (o.municipality !== null && typeof o.municipality !== 'string') return false;
   if (!isObj(o.input) || !isObj(o.home) || !isObj(o.area) || !validShelters(o.shelters)) return false;
   const h = o.home;
@@ -65,6 +70,9 @@ function validSaved(o: Record<string, unknown>): boolean {
   if (!isObj(t)) return false;
   if (t.kind === 'band' || t.kind === 'nearby') { if (!isStr(t.depth) || (t.arrival !== null && !isStr(t.arrival)) || typeof t.urgent !== 'boolean' || (t.arrivalCaveat !== undefined && !isStr(t.arrivalCaveat))) return false; }
   else if (t.kind !== 'none' && t.kind !== 'unknown') return false;
+  if (h.stages !== undefined && !(Array.isArray(h.stages) && h.stages.every((g) => isObj(g) && isStr(g.label) && isRange(g.collapse) && isRange(g.half)))) return false;
+  // 時間差（LAG_*）は stages 必須、それ以外は stages なし
+  if ((typeof o.scenario === 'string' && o.scenario.startsWith('LAG_')) !== (h.stages !== undefined)) return false;
   if (!Array.isArray(h.notes) || !h.notes.every((n) => typeof n === 'string')) return false;
   const a = o.area;
   if (a.status === 'ok') return Number.isFinite(a.collapse) && Number.isFinite(a.half) && Number.isFinite(a.meshes);
@@ -78,6 +86,8 @@ export function loadLast(store: Storage): Saved | null {
     if (raw === null) return null;
     let v: unknown = null;
     try { v = JSON.parse(raw); } catch { /* 下で消す */ }
+    // v3 は scenario を持たない（L2 だけだった）。v4 に読み替える。
+    if (isObj(v) && v.v === 3) v = { ...v, v: 4, scenario: 'L2' };
     if (isObj(v) && validSaved(v)) return v as unknown as Saved;
     clearLast(store);
     return null;

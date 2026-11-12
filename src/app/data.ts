@@ -8,6 +8,11 @@ export type Fetcher = (url: string) => Promise<{
   json(): Promise<unknown>;
 }>;
 
+/** 画面のタブ（想定ケース）。L2 = 最大クラス、HALF_E/W = 東側/西側の半割れ、LAG_EW/WE = 時間差（先発→後発）。 */
+export type Scenario = 'L2' | 'HALF_E' | 'HALF_W' | 'LAG_EW' | 'LAG_WE';
+/** ハザードのファイルがあるケース（時間差は HALF_E と HALF_W の組合せ）。 */
+export type HazardCase = 'L2' | 'HALF_E' | 'HALF_W';
+
 export type Manifest = {
   datasets: { id: string; source: string; url?: string; notes?: string; [k: string]: unknown }[];
 };
@@ -26,14 +31,15 @@ export interface DataSource {
    * 対応範囲は 250m メッシュ単位（Ruling F1・F4: メッシュの四角が5県の境界と面積>0で重なる）。
    * 2次メッシュが {case}/index.json に無い、またはファイルにそのメッシュの行が無い（隣県など）なら 'outside'。
    * 行はあるが想定値が無い（震度が null）なら null（データなし）。
-   * index.json にあるのにファイルが読めない（404・HTML・壊れた JSON）、または index.json が読めないときは例外（再試行できる）。
+   * 対応エリアの判定は、どのケースでも常に L2 の index.json を使う。HALF_E/HALF_W は、範囲内なのにそのケースのファイル・行が無ければ null（データなし。例外にしない）。
+   * L2 は index.json にあるのにファイルが読めない（404・HTML・壊れた JSON）、または index.json が読めないときは例外（再試行できる）。
    */
-  hazardCell(caseId: 'L2', mesh: string): Promise<HazardCell | null | 'outside'>;
+  hazardCell(caseId: HazardCase, mesh: string): Promise<HazardCell | null | 'outside'>;
   /** この 250m メッシュが対応範囲にあるか（hazardCell が 'outside' でないか）。読めなければ例外。 */
-  covers(caseId: 'L2', mesh: string): Promise<boolean>;
+  covers(caseId: HazardCase, mesh: string): Promise<boolean>;
   stockFor(meshes: string[]): Promise<Record<string, BuildingStock>>;
   /** 対応範囲外のメッシュと想定値の無いメッシュは含めない。範囲内のファイルが読めなければ例外。 */
-  hazardFor(caseId: 'L2', meshes: string[]): Promise<Record<string, HazardCell>>;
+  hazardFor(caseId: HazardCase, meshes: string[]): Promise<Record<string, HazardCell>>;
   municipalityOf(mesh: string): Promise<string | null>;
   /** 中心の2次メッシュと隣接8つの避難場所ファイルを読み、半径内のものを返す（404 は空） */
   sheltersNear(pos: LatLon, radiusM: number): Promise<Shelter[]>;
@@ -119,14 +125,22 @@ export function createDataSource(fetcher: Fetcher, base = '/data'): DataSource {
     return p;
   }
 
-  const hazardFile = (caseId: string, mesh: string) =>
-    loadRequired<Record<string, HazardRow>>(`${base}/hazard/${caseId}/${mesh2Of(mesh)}.json`);
+  const hazardUrl = (caseId: string, mesh: string) => `${base}/hazard/${caseId}/${mesh2Of(mesh)}.json`;
+  /** L2 のファイルは必ずある。半割れのファイルは無いことがある（404・HTML・壊れた JSON → null）。通信エラーは例外。 */
+  const hazardFile = (caseId: string, mesh: string): Promise<Record<string, HazardRow> | null> =>
+    caseId === 'L2' ? loadRequired<Record<string, HazardRow>>(hazardUrl(caseId, mesh)) : load<Record<string, HazardRow>>(hazardUrl(caseId, mesh));
+  /** 対応エリアは常に L2 の index（半割れの index.json は見ない）。 */
+  const coveredBy2 = () => coverageOf('L2');
   const stockFile = (mesh: string) => load<Record<string, BuildingStock>>(`${base}/stock/${mesh2Of(mesh)}.json`);
 
   async function hazardCell(caseId: string, mesh: string): Promise<HazardCell | null | 'outside'> {
-    if (!(await coverageOf(caseId)).has(mesh2Of(mesh))) return 'outside';
-    const row = rowOf(await hazardFile(caseId, mesh), mesh);
-    if (!row) return 'outside'; // 同じ2次メッシュでも5県外（隣県）のメッシュには行が無い（Ruling F1）
+    if (!(await coveredBy2()).has(mesh2Of(mesh))) return 'outside';
+    const file = await hazardFile(caseId, mesh);
+    const row = file ? rowOf(file, mesh) : null;
+    if (!row) {
+      if (caseId !== 'L2') return null; // 半割れは範囲内でもファイル・行が無いことがある。5県内かは L2 で決める
+      return 'outside'; // 同じ2次メッシュでも5県外（隣県）のメッシュには行が無い（Ruling F1）
+    }
     const cell = toCell(row);
     return cell.intensity === null ? null : cell;
   }
@@ -144,16 +158,18 @@ export function createDataSource(fetcher: Fetcher, base = '/data'): DataSource {
 
   return {
     async covers(caseId, mesh) {
-      return (await hazardCell(caseId, mesh)) !== 'outside';
+      // 対応エリアは常に L2 で決める（半割れのファイルが無くても「範囲外」にしない）
+      return (await hazardCell('L2', mesh)) !== 'outside';
     },
     hazardCell,
     async hazardFor(caseId, meshes) {
-      const covered = await coverageOf(caseId);
+      const covered = await coveredBy2();
       const out: Record<string, HazardCell> = {};
       await Promise.all(
         meshes.map(async (mesh) => {
           if (!covered.has(mesh2Of(mesh))) return;
-          const row = rowOf(await hazardFile(caseId, mesh), mesh);
+          const file = await hazardFile(caseId, mesh);
+          const row = file ? rowOf(file, mesh) : null;
           const cell = row ? toCell(row) : null;
           if (cell && cell.intensity !== null) out[mesh] = cell;
         }),

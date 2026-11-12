@@ -45,7 +45,7 @@ const colorFor = (rate: number | null) =>
 
 export type MeshRate = { mesh: string; rate: number | null };
 
-export type ResultMapHandle = { map: L.Map; highlightShelter(index: number): void };
+export type ResultMapHandle = { map: L.Map; highlightShelter(index: number): void; /** 全壊率の色分けだけ差し替える（地図はそのまま） */ setMeshRates(meshes: MeshRate[]): void };
 
 export function createResultMap(
   node: HTMLElement,
@@ -63,19 +63,26 @@ export function createResultMap(
     pane: 'tsunami', opacity: 0.5, maxNativeZoom: 17, maxZoom: 18, attribution: TSUNAMI_CREDIT_SHORT,
     errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==',
   }).addTo(map);
-  for (const { mesh, rate } of meshes) {
-    const c = meshCenter(mesh);
-    const dLat = 1 / 960, dLon = 1 / 640;
-    L.rectangle(
-      [
-        [c.lat - dLat, c.lon - dLon],
-        [c.lat + dLat, c.lon + dLon],
-      ],
-      { stroke: false, fillColor: colorFor(rate), fillOpacity: 0.55, interactive: true },
-    )
-      .bindTooltip(tip(rate === null ? 'データなし' : `全壊率の推計 ${(rate * 100).toFixed(1)}%`))
-      .addTo(map);
-  }
+  // 全壊率の四角は自宅の印・1km の円（overlayPane=400）より下の別ペインに置く。タブを替えて描き直しても自宅の印が上に残る。
+  map.createPane('mesh').style.zIndex = '380';
+  const rects = L.layerGroup().addTo(map);
+  const setMeshRates = (list: MeshRate[]): void => {
+    rects.clearLayers();
+    for (const { mesh, rate } of list) {
+      const c = meshCenter(mesh);
+      const dLat = 1 / 960, dLon = 1 / 640;
+      L.rectangle(
+        [
+          [c.lat - dLat, c.lon - dLon],
+          [c.lat + dLat, c.lon + dLon],
+        ],
+        { pane: 'mesh', stroke: false, fillColor: colorFor(rate), fillOpacity: 0.55, interactive: true },
+      )
+        .bindTooltip(tip(rate === null ? 'データなし' : `全壊率の推計 ${(rate * 100).toFixed(1)}%`))
+        .addTo(rects);
+    }
+  };
+  setMeshRates(meshes);
   L.circle([home.lat, home.lon], { radius: 1000, color: '#1f4e79', weight: 2, fill: false, dashArray: '6 6' }).addTo(map);
   L.circleMarker([home.lat, home.lon], { radius: 9, color: '#fff', weight: 3, fillColor: '#1f4e79', fillOpacity: 1 })
     .bindTooltip(tip('自宅（入力した場所）'))
@@ -93,6 +100,7 @@ export function createResultMap(
     highlightShelter(index) {
       pins.forEach((p, i) => p.getElement()?.classList.toggle('selected', i === index));
     },
+    setMeshRates,
   };
 }
 

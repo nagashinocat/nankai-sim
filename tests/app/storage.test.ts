@@ -22,7 +22,8 @@ const shelters: Saved['shelters'] = [
   { hazard: 'tsunami', items: [] },
 ];
 const saved: Saved = {
-  v: 3,
+  v: 4,
+  scenario: 'L2',
   savedAt: '2026-11-12T01:23:45.000Z',
   municipality: '菰野町',
   input: { structure: 'wood', era: 'pre1981', floors: 2 } as never,
@@ -87,7 +88,7 @@ test('入れ子の値が壊れている／古いスキーマ → null', () => {
     { ...saved, v: undefined },
     { ...saved, v: 1 }, // 旧スキーマ（避難場所なし）は読まない
     { ...saved, v: 2 },
-    { ...saved, v: 4 },
+    { ...saved, v: 5 },
     { ...saved, shelters: undefined },
     { ...saved, shelters: [{ hazard: 'flood', items: [] }] },
     { ...saved, shelters: [{ hazard: 'earthquake', items: [{ name: 'x' }] }] },
@@ -180,4 +181,54 @@ test('v3: 到達時間の注意（arrivalCaveat, Ruling W-d）は文字列なら
   assert.notEqual(loadLast(s), null);
   s.setItem(LAST_KEY, JSON.stringify({ ...saved, home: { ...home, tsunami: { ...t, arrivalCaveat: 1 } } }));
   assert.equal(loadLast(s), null);
+});
+
+test('v4: シナリオを往復。時間差の stages も保存・復元できる', () => {
+  const s = memStore();
+  const lag: Saved = { ...saved, scenario: 'LAG_EW', home: { ...(saved.home as object), stages: [
+    { label: '先発（東側）', collapse: range, half: range }, { label: '後発まで含めた合計', collapse: range, half: range },
+  ] } as never };
+  saveLast(lag, s);
+  assert.deepEqual(loadLast(s), lag);
+});
+
+test('v3 の保存は scenario L2 として読む（v4 に読み替え）', () => {
+  const s = memStore();
+  const { scenario: _drop, ...rest } = saved;
+  s.setItem(LAST_KEY, JSON.stringify({ ...rest, v: 3 }));
+  assert.deepEqual(loadLast(s), saved);
+});
+
+test('v4 で scenario が無い/未知、stages の形が不正 → null で消す。v2 は捨てる', () => {
+  for (const bad of [
+    { ...saved, scenario: undefined }, { ...saved, scenario: 'HALF_X' }, { ...saved, scenario: 3 },
+    { ...saved, home: { ...saved.home, stages: [{ label: 1 }] } }, { ...saved, home: { ...saved.home, stages: 'x' } },
+    { ...saved, v: 2 },
+  ]) {
+    const s = memStore();
+    s.setItem(LAST_KEY, JSON.stringify(bad));
+    assert.equal(loadLast(s), null);
+    assert.equal(s.raw.has(LAST_KEY), false);
+  }
+});
+
+test('保存に住所・座標を含まない（scenario は ID の文字列だけ）', () => {
+  const s = memStore();
+  saveLast(saved, s);
+  assert.doesNotMatch(s.raw.get(LAST_KEY)!, /lat|lon|address|pos/i);
+});
+
+test('LAG_* は stages 必須、それ以外は stages なし', () => {
+  const st = [{ label: 'a', collapse: range, half: range }, { label: 'b', collapse: range, half: range }];
+  for (const bad of [
+    { ...saved, scenario: 'LAG_EW' }, { ...saved, scenario: 'LAG_WE' },
+    { ...saved, scenario: 'HALF_E', home: { ...saved.home, stages: st } }, { ...saved, home: { ...saved.home, stages: st } },
+  ]) {
+    const s = memStore();
+    s.setItem(LAST_KEY, JSON.stringify(bad));
+    assert.equal(loadLast(s), null);
+  }
+  const s = memStore();
+  s.setItem(LAST_KEY, JSON.stringify({ ...saved, scenario: 'HALF_W' }));
+  assert.notEqual(loadLast(s), null);
 });

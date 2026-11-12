@@ -46,6 +46,17 @@ export function estimateHome(
   input: HomeInput,
   tsunamiRange?: Range,
 ): { collapse: Range; half: Range; central: Rates } | null {
+  return rangeOver(cell, input, tsunamiRange, (shifted, _di, s, e, floors, mode) => ratesForCell(shifted, s, e, floors, mode));
+}
+
+/** estimateHome / estimateHomeLag 共通の幅のループ。cell は津波の深さを持つセル（時間差なら後発）。
+ *  rate(震度ずれ・浸水深を適用したセル, 震度ずれ, 構造, 年代, 階数, 曲線) が null なら全体も null。 */
+function rangeOver(
+  cell: HazardCell,
+  input: HomeInput,
+  tsunamiRange: Range | undefined,
+  rate: (shifted: HazardCell, di: number, s: Structure, e: Era, floors: number | undefined, mode: CurveMode) => Rates | null,
+): { collapse: Range; half: Range; central: Rates } | null {
   if (cell.intensity === null || !Number.isFinite(cell.intensity)) return null;
   const structures = input.structure === 'unknown' ? STRUCTURES : [input.structure];
   const floors = input.floors ?? undefined;
@@ -61,14 +72,14 @@ export function estimateHome(
       for (const e0 of eras) {
         const e = input.retrofitted ? newer(e0) : e0;
         for (const mode of ['min', 'rep', 'max'] as const) {
-          const r = ratesForCell(shifted, s, e, floors, mode);
+          const r = rate(shifted, di, s, e, floors, mode);
           if (!r) return null;
           cMin = Math.min(cMin, r.collapse); cMax = Math.max(cMax, r.collapse);
           hMin = Math.min(hMin, r.half); hMax = Math.max(hMax, r.half);
         }
         if (di === 0 && depth === depths[depths.length - 1]) {
           // central は常に cell.tsunamiDepth（範囲の端ではない）
-          const r = ratesForCell({ ...shifted, tsunamiDepth: cell.tsunamiDepth }, s, e, floors, 'rep');
+          const r = rate({ ...shifted, tsunamiDepth: cell.tsunamiDepth }, di, s, e, floors, 'rep');
           if (!r) return null;
           cSum += r.collapse; hSum += r.half; n++;
         }
@@ -96,4 +107,23 @@ export function estimateLag(
     collapse: f.collapse + u * ri.collapse + f.half * rd.collapse,
     half: u * ri.half + f.half * (1 - rd.collapse),
   };
+}
+
+/** 時間差の幅つき推定。先発の幅は estimateHome({...first, tsunamiDepth: null}, input) と同じ（津波を含めない）。
+ *  合計は各組合せで estimateLag（先発・後発に同じ震度ずれを適用）。
+ *  津波は合計にだけ、後発のセル（と tsunamiRange）から一度だけ加える。first.tsunamiDepth は先発・合計とも無視する。
+ *  先発・後発どちらかの震度が null/非有限なら null（後発だけで計算しない）。 */
+export function estimateHomeLag(
+  first: HazardCell, second: HazardCell, input: HomeInput, tsunamiRange?: Range,
+): {
+  first: { collapse: Range; half: Range; central: Rates };
+  total: { collapse: Range; half: Range; central: Rates };
+} | null {
+  const firstNoTsunami: HazardCell = { ...first, tsunamiDepth: null };
+  const f = estimateHome(firstNoTsunami, input);
+  if (!f) return null; // first.intensity の null/非有限はここで弾くので、下の first.intensity! は有限
+  const total = rangeOver(second, input, tsunamiRange, (shifted, di, s, e, floors, mode) =>
+    estimateLag({ ...firstNoTsunami, intensity: first.intensity! + di }, shifted, s, e, floors, mode));
+  if (!total) return null;
+  return { first: f, total };
 }

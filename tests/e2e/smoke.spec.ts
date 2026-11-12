@@ -236,7 +236,8 @@ test('津波: 浸水深1〜3mの色 → 浸水深・到達時間・注記・避�
   await page.screenshot({ path: 'reports/tsunami-home-390x844.png' }); // 390×844 の画面（自宅の結果）
   // 保存は文言だけ（座標なし）
   const raw = await page.evaluate(() => localStorage.getItem('nankai-sim:last'));
-  expect(raw).toContain('"v":3');
+  expect(raw).toContain('"v":4');
+  expect(raw).toContain('"scenario":"L2"');
   expect(raw).toContain('1〜3m');
   expect(raw).not.toMatch(/"(lat|lon|pos)"/);
 });
@@ -395,4 +396,271 @@ test('和歌山県 串本町に 1〜3m の色 → 到達 最短約1分（1m）�
   await expect(page.locator('#home-result .tsunami-strong')).toHaveText(STRONG);
   await expect(page.locator('#home-result .tsunami-urgent')).toHaveText('揺れが収まったらすぐ高い所へ');
   await expect(page.locator('#evac').getByText('揺れが収まったらすぐ高い所へ').first()).toBeVisible();
+});
+
+// --- シナリオのタブ（半割れ・時間差）。実データ（HALF_E / HALF_W）を使う ---
+const TAB_NAMES = ['最大クラス', '東側の半割れ', '西側の半割れ', '時間差（東→西）', '時間差（西→東）'];
+const HALF_TEXT = '南海トラフの東側（または西側）だけで大きな地震が起きた場合の想定です。残りの半分でも続けて大地震が起きるおそれがあり、『南海トラフ地震臨時情報（巨大地震警戒）』が出たら、1週間程度は事前避難や備えの再確認をしてください';
+const LAG_TEXT = '先に片側で地震が起き、その後もう片側でも地震が起きた場合の想定です。先の地震で傷んだ建物は、後の地震で壊れやすくなります（国の手法：先の地震で半壊した建物は、後の地震で震度が0.5高い場合と同じ全壊率で計算）';
+const TSUNAMI_SCENARIO_NOTE = '津波は最大クラスの想定を表示しています。半割れ・時間差では津波の高さや到達時間が異なる場合がありますが、強い揺れを感じたらすぐ高い所へ避難してください';
+
+async function searchKomono(page: import('@playwright/test').Page) {
+  await search(page, KOMONO, '菰野町吉澤');
+  await page.getByLabel('建築年').selectOption('pre1981');
+  await page.getByLabel('構造').selectOption('wood');
+  await page.getByRole('button', { name: '調べる' }).click();
+  await expect(page.locator('#home-result').getByText(/震度\d/)).toBeVisible({ timeout: 30_000 });
+}
+const tab = (page: import('@playwright/test').Page, name: string) => page.getByRole('tab', { name, exact: true });
+
+test('タブ: 5つが決まった順で並び、初期は「最大クラス」。結果の形は従来どおり', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await expect(page.getByRole('tablist')).toBeVisible();
+  expect(await page.getByRole('tab').allTextContents()).toEqual(TAB_NAMES);
+  await expect(tab(page, '最大クラス')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('tabpanel')).toBeVisible();
+  await expect(page.getByText('最大クラス（国の想定）').first()).toBeVisible();
+  await expect(page.getByText(HALF_TEXT)).toHaveCount(0);
+  await expect(page.getByText(TSUNAMI_SCENARIO_NOTE)).toHaveCount(0);
+});
+
+test('タブ: 「東側の半割れ」で説明文・数値が変わり、津波の注記が出る。最大クラスに戻すと元どおり', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await stubTsunami(page, { rgb: [255, 216, 192] });
+  await searchKomono(page);
+  const home = page.locator('#home-result');
+  await expect(home.getByText('津波 浸水深 1〜3m（想定）')).toBeVisible();
+  const l2Text = await home.innerText();
+  await tab(page, '東側の半割れ').click();
+  await expect(tab(page, '東側の半割れ')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText(HALF_TEXT)).toBeVisible();
+  await expect(page.getByText(TSUNAMI_SCENARIO_NOTE)).toBeVisible();
+  await expect(home.getByText(/震度\d/)).toBeVisible();
+  const halfText = await home.innerText();
+  expect(halfText).not.toBe(l2Text);
+  // 津波の行は最大クラスと同じ
+  await expect(home.getByText('津波 浸水深 1〜3m（想定）')).toBeVisible();
+  await expect(home.locator('.tsunami-strong')).toHaveText(STRONG);
+  // 津波の注記は津波の行の下
+  const order = await home.locator('p').evaluateAll((ps) => ps.map((p) => p.textContent ?? ''));
+  expect(order.findIndex((t) => t === '津波は最大クラスの想定を表示しています。半割れ・時間差では津波の高さや到達時間が異なる場合がありますが、強い揺れを感じたらすぐ高い所へ避難してください')).toBeGreaterThan(order.findIndex((t) => t.startsWith('津波 浸水深')));
+  await expect(page.locator('#case-line')).toContainText('東側の半割れ');
+  await tab(page, '最大クラス').click();
+  await expect(page.getByText(HALF_TEXT)).toHaveCount(0);
+  await expect(page.getByText(TSUNAMI_SCENARIO_NOTE)).toHaveCount(0);
+  await expect.poll(() => home.innerText()).toBe(l2Text);
+});
+
+test('タブ: 「時間差（東→西）」は先発と合計の2段階。合計は先発以上。説明文と「先に東側で…、後に西側で…」', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await tab(page, '時間差（東→西）').click();
+  const home = page.locator('#home-result');
+  await expect(page.getByText(LAG_TEXT)).toBeVisible();
+  await expect(home.getByRole('heading', { name: '先発（東側）' })).toBeVisible();
+  await expect(home.getByRole('heading', { name: '後発まで含めた合計' })).toBeVisible();
+  await expect(home.getByText(/先に東側で震度\d.*、後に西側で震度\d/)).toBeVisible();
+  await expect(home.getByText(/先発 震度|後発 震度/)).toHaveCount(0);
+  await expect(home.getByText(/全壊（代表値）/)).toHaveCount(2);
+  await expect(home.getByText(/幅 .*〜/)).toHaveCount(4);
+  const pct = (s: string) => Number(/([\d.]+)%/.exec(s)![1]);
+  const mins = await home.locator('p.big', { hasText: '全壊' }).allTextContents();
+  const lo = (t: string) => pct(/幅 ([^〜]+)〜/.exec(t)![1]);
+  expect(lo(mins[1])).toBeGreaterThanOrEqual(lo(mins[0]));
+  await expect(page.getByText(TSUNAMI_SCENARIO_NOTE)).toBeVisible();
+  await page.getByRole('tablist').evaluate((e) => e.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: 'reports/scenario-lag-tab-390x844.png' });
+  await tab(page, '時間差（西→東）').click();
+  await expect(home.getByRole('heading', { name: '先発（西側）' })).toBeVisible();
+  await expect(home.getByText(/先に西側で震度\d.*、後に東側で震度\d/)).toBeVisible();
+});
+
+test('タブ: 周辺の推計と地図の色がタブに合わせて変わる', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  const area = page.locator('section.card', { has: page.getByRole('heading', { name: '周辺1km（推計）' }) });
+  const fills = () => page.locator('#result-map path.leaflet-interactive').evaluateAll((ps) => ps.map((p) => p.getAttribute('fill')).join(','));
+  const l2Area = await area.innerText();
+  const l2Fills = await fills();
+  await tab(page, '時間差（東→西）').click();
+  await expect(page.locator('#case-line')).toContainText('時間差（東→西）');
+  await expect.poll(() => area.innerText()).not.toBe(l2Area);
+  expect(await fills()).not.toBe(l2Fills);
+});
+
+test('タブ: 素早く2回切り替えても、最後に選んだタブの結果だけが出る', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await page.route('**/data/hazard/HALF_E/**', async (r) => { await new Promise((res) => setTimeout(res, 1500)); await r.continue(); });
+  await tab(page, '東側の半割れ').click();
+  await tab(page, '西側の半割れ').click();
+  await expect(tab(page, '西側の半割れ')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.locator('#case-line')).toContainText('西側の半割れ');
+  await expect(page.locator('#home-result').getByText(/震度\d/)).toBeVisible();
+  const shown = await page.locator('#home-result').innerText();
+  await page.waitForTimeout(2500); // 遅れて東側の計算が終わっても描画しない
+  await expect(page.locator('#case-line')).toContainText('西側の半割れ');
+  await expect(page.locator('#case-line')).not.toContainText('東側の半割れ');
+  expect(await page.locator('#home-result').innerText()).toBe(shown);
+  expect(await page.evaluate(() => localStorage.getItem('nankai-sim:last'))).toContain('"scenario":"HALF_W"');
+});
+
+test('タブ: 390px で折り返さず、横スクロールで最後のタブも選べる', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  const list = page.getByRole('tablist');
+  const m = await list.evaluate((e) => ({ sw: e.scrollWidth, cw: e.clientWidth, ox: getComputedStyle(e).overflowX, tops: [...e.querySelectorAll('[role=tab]')].map((t) => (t as HTMLElement).offsetTop) }));
+  expect(m.sw).toBeGreaterThan(m.cw);
+  expect(['auto', 'scroll']).toContain(m.ox);
+  expect(new Set(m.tops).size).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await tab(page, '時間差（西→東）').click();
+  await expect(tab(page, '時間差（西→東）')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByText(LAG_TEXT)).toBeVisible();
+});
+
+test('タブ: 矢印キー・Home・End で移動できる', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await tab(page, '最大クラス').focus();
+  await page.keyboard.press('ArrowRight');
+  await expect(tab(page, '東側の半割れ')).toHaveAttribute('aria-selected', 'true');
+  await expect(tab(page, '東側の半割れ')).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(tab(page, '時間差（西→東）')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowRight'); // 端で先頭へ
+  await expect(tab(page, '最大クラス')).toHaveAttribute('aria-selected', 'true');
+  await page.keyboard.press('ArrowLeft');
+  await expect(tab(page, '時間差（西→東）')).toHaveAttribute('aria-selected', 'true');
+  await expect(tab(page, '最大クラス')).toHaveAttribute('tabindex', '-1');
+});
+
+test('タブ: 片方のデータが無いタブだけ「この想定のデータがありません」。通信エラーのタブは再読み込みできる', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await page.route('**/data/hazard/HALF_W/**', (r) => r.fulfill({ status: 404, body: 'not found' }));
+  await tab(page, '西側の半割れ').click();
+  await expect(page.locator('#home-result').getByText('この想定のデータがありません')).toBeVisible();
+  await tab(page, '時間差（東→西）').click();
+  await expect(page.locator('#home-result').getByText('この想定のデータがありません')).toBeVisible();
+  await tab(page, '東側の半割れ').click();
+  await expect(page.locator('#home-result').getByText(/震度\d/)).toBeVisible();
+  await expect(page.getByText('この想定のデータがありません')).toHaveCount(0);
+});
+
+test('タブ: 通信エラーのタブは「もう一度読み込む」でそのタブだけ再試行できる。他のタブは使える', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await page.route('**/data/hazard/HALF_W/**', (r) => r.fulfill({ status: 500, body: 'boom' }));
+  await tab(page, '時間差（西→東）').click();
+  await expect(page.getByRole('button', { name: 'もう一度読み込む' })).toBeVisible();
+  await expect(page.getByText('この想定のデータがありません')).toHaveCount(0);
+  await tab(page, '最大クラス').click(); // 他のタブは使える
+  await expect(page.locator('#home-result').getByText(/震度\d/)).toBeVisible();
+  await tab(page, '時間差（西→東）').click();
+  await expect(page.getByRole('button', { name: 'もう一度読み込む' })).toBeVisible();
+  await page.unroute('**/data/hazard/HALF_W/**');
+  await page.getByRole('button', { name: 'もう一度読み込む' }).click();
+  await expect(page.locator('#home-result').getByRole('heading', { name: '先発（西側）' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'もう一度読み込む' })).toHaveCount(0);
+});
+
+test('タブ: 選んだタブの結果を保存し、前回の結果にそのタブ名と2段階が出る。新しい場所の検索ではタブが最大クラスに戻る', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await tab(page, '時間差（東→西）').click();
+  await expect(page.locator('#home-result').getByRole('heading', { name: '先発（東側）' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('nankai-sim:last'))).toContain('"scenario":"LAG_EW"');
+  const raw = (await page.evaluate(() => localStorage.getItem('nankai-sim:last')))!;
+  expect(raw).toContain('"stages"');
+  expect(raw).not.toMatch(/"(lat|lon|pos)"/);
+  await page.reload();
+  const last = page.locator('#last-result');
+  await expect(last.getByText('時間差（東→西）')).toBeVisible();
+  await expect(last.getByText('最大クラス（国の想定）')).toHaveCount(0);
+  await expect(last.getByRole('heading', { name: '先発（東側）' })).toBeVisible();
+  await expect(last.getByRole('heading', { name: '後発まで含めた合計' })).toBeVisible();
+  await expect(last.getByText(/先に東側で震度\d.*、後に西側で震度\d/)).toBeVisible();
+  // もう一度調べると最大クラスから始まる
+  await page.getByLabel('住所').fill('菰野町吉澤');
+  await page.getByRole('button', { name: '調べる' }).click();
+  await expect(tab(page, '最大クラス')).toHaveAttribute('aria-selected', 'true', { timeout: 30_000 });
+});
+
+test('説明ページに半割れ・時間差と南海トラフ地震臨時情報の説明がある', async ({ page }) => {
+  await page.goto('/#about');
+  await expect(page.getByRole('heading', { name: '半割れ・時間差と臨時情報' })).toBeVisible();
+  await expect(page.getByText(HALF_TEXT)).toBeVisible();
+  await expect(page.getByText(LAG_TEXT)).toBeVisible();
+});
+
+test('タブ（I1）: 浸水域内の自宅。データなし・読み込み失敗のタブにも F2 の強い一文と津波の注記が出る', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await stubTsunami(page, { rgb: [255, 216, 192] });
+  await searchKomono(page);
+  const home = page.locator('#home-result');
+  await expect(home.locator('.tsunami-strong')).toHaveText(STRONG);
+  await page.route('**/data/hazard/HALF_E/**', (r) => r.fulfill({ status: 404, body: 'not found' }));
+  await tab(page, '東側の半割れ').click();
+  await expect(home.getByText('この想定のデータがありません')).toBeVisible();
+  await expect(home.locator('.tsunami-strong')).toHaveText(STRONG);
+  await expect(home.getByText('津波 浸水深 1〜3m（想定）')).toBeVisible();
+  await expect(home.getByText(TSUNAMI_SCENARIO_NOTE)).toBeVisible();
+  // 周辺の推計は「建物データなし」ではなく、この想定のデータが無いこと
+  const area = page.locator('section.card', { has: page.getByRole('heading', { name: '周辺1km（推計）' }) });
+  await expect(area.getByText('この想定のデータがありません')).toBeVisible();
+  await expect(area.getByText('建物データなし')).toHaveCount(0);
+  await page.route('**/data/hazard/HALF_W/**', (r) => r.fulfill({ status: 500, body: 'boom' }));
+  await tab(page, '西側の半割れ').click();
+  await expect(home.getByRole('button', { name: 'もう一度読み込む' })).toBeVisible();
+  await expect(home.locator('.tsunami-strong')).toHaveText(STRONG);
+  await expect(home.getByText(TSUNAMI_SCENARIO_NOTE)).toBeVisible();
+  // L2 に戻ると注記は消え、津波の行は同じ
+  await tab(page, '最大クラス').click();
+  await expect(home.getByText(TSUNAMI_SCENARIO_NOTE)).toHaveCount(0);
+  await expect(home.locator('.tsunami-strong')).toHaveText(STRONG);
+});
+
+test('タブ: タブを切り替えて戻しても、自宅の印が全壊率の四角より上に残る', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await tab(page, '時間差（東→西）').click();
+  await expect(page.locator('#case-line')).toContainText('時間差（東→西）');
+  await tab(page, '最大クラス').click();
+  await expect(page.locator('#case-line')).toContainText('最大クラス');
+  const z = await page.evaluate(() => {
+    const pane = (c: string) => Number(getComputedStyle(document.querySelector(`#result-map .leaflet-${c}-pane`)!).zIndex);
+    return { mesh: pane('mesh'), overlay: pane('overlay') };
+  });
+  expect(z.mesh).toBeLessThan(z.overlay);
+  // 自宅の印の中心にある要素は、自宅の印（overlay ペインの円）
+  await page.locator('#result-map').scrollIntoViewIfNeeded();
+  const hit = await page.evaluate(() => {
+    const marker = [...document.querySelectorAll('#result-map .leaflet-overlay-pane path')].find((p) => p.getAttribute('fill') === '#1f4e79' && p.getAttribute('fill-opacity') === '1')!;
+    const r = marker.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return top === marker ? 'ok' : `${top?.tagName}.${top?.getAttribute('class')} fill=${top?.getAttribute('fill')}`;
+  });
+  expect(hit).toBe('ok');
+});
+
+test('タブ: 前回の結果（半割れ・時間差）にも説明文が出る。共有文面は入れ子の括弧なし', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await tab(page, '時間差（東→西）').click();
+  const share = page.locator('#share-text');
+  await expect(share).toHaveValue(/^南海トラフ地震・時間差（東→西）の想定で、菰野町の自宅/);
+  await expect(share).toHaveValue(/後発まで含めた合計：全壊 代表値/);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('nankai-sim:last'))).toContain('"scenario":"LAG_EW"');
+  await page.reload();
+  await expect(page.locator('#last-result').getByText(LAG_TEXT)).toBeVisible();
+});
+
+test('タブ: 読み込み中の表示は aria-live=polite', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await searchKomono(page);
+  await page.route('**/data/hazard/HALF_E/**', async (r) => { await new Promise((res) => setTimeout(res, 1500)); await r.continue(); });
+  await tab(page, '東側の半割れ').click();
+  await expect(page.locator('#home-result [role=status]')).toHaveAttribute('aria-live', 'polite');
 });

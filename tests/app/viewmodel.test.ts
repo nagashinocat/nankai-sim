@@ -5,7 +5,7 @@ import { useFragilityTable, type FragilityTable } from '../../src/core/fragility
 import { estimateArea } from '../../src/core/neighborhood.ts';
 import type { BuildingStock, HazardCell, HomeInput, Shelter } from '../../src/core/types.ts';
 import { TSUNAMI_BANDS } from '../../src/core/tsunami.ts';
-import { areaViewModel, evacuationViewModel, formatPct, homeViewModel, intensityLabel, locationNote } from '../../src/app/viewmodel.ts';
+import { areaLagViewModel, homeLagViewModel, areaViewModel, evacuationViewModel, formatPct, homeViewModel, intensityLabel, locationNote } from '../../src/app/viewmodel.ts';
 
 before(() => useFragilityTable(fixture as unknown as FragilityTable));
 
@@ -395,4 +395,69 @@ test('homeTsunamiLines（W-d）: 和歌山（1m）・静岡（50cm）は到達�
   for (const t of texts(homeViewModel(cell(), home(), band('1〜3m'), { min: null, cm: 100 }))) assert.doesNotMatch(t, /それより低い津波/);
   const lines = homeTsunamiLines({ kind: 'band', depth: '1〜3m', arrival: '海岸への到達 最短約12分（1m）', arrivalCaveat: CAVEAT_1M, urgent: false });
   assert.equal(lines.find((l) => l.text === CAVEAT_1M)?.cls, 'note tsunami-caveat');
+});
+
+
+// ---- 時間差 ----
+const LABELS = ['先発（東側）', '後発まで含めた合計'] as const;
+const unk = home({ structure: 'unknown', era: 'unknown' });
+
+test('homeLagViewModel: stages は先発と合計の2段階。トップの collapse/half は合計。幅は先発以上', () => {
+  const vm = homeLagViewModel(cell({ intensity: 5.6 }), cell({ intensity: 6.0 }), unk, 'none', null, LABELS);
+  assert.equal(vm.status, 'ok');
+  if (vm.status !== 'ok') return;
+  assert.ok(vm.stages);
+  assert.deepEqual(vm.stages!.map((s) => s.label), [...LABELS]);
+  assert.deepEqual(vm.stages![1].collapse, vm.collapse);
+  assert.deepEqual(vm.stages![1].half, vm.half);
+  const [f, t] = vm.stages!;
+  assert.ok(pct(t.collapse.min) >= pct(f.collapse.min));
+  assert.ok(pct(t.collapse.max) >= pct(f.collapse.max));
+  assert.ok(pct(t.collapse.central) >= pct(f.collapse.central));
+  // 曲線3種・震度±0.5・わからない項目で幅が出る
+  assert.ok(pct(f.collapse.max) > pct(f.collapse.min));
+  assert.ok(pct(t.collapse.max) > pct(t.collapse.min));
+  assert.ok(vm.notes.includes(UNKNOWN_NOTE));
+});
+
+test('homeLagViewModel: sides を渡すと震度の行は「先に東側で震度X、後に西側で震度Y」。渡さなければ従来の形', () => {
+  const f = cell({ intensity: 5.6 }), s2 = cell({ intensity: 6.0 });
+  const a = homeLagViewModel(f, s2, unk, 'none', null, LABELS, ['東側', '西側']);
+  const b = homeLagViewModel(f, s2, unk, 'none', null, LABELS);
+  assert.ok(a.status === 'ok' && b.status === 'ok');
+  if (a.status !== 'ok' || b.status !== 'ok') return;
+  assert.equal(a.intensityLabel, '先に東側で震度6弱、後に西側で震度6強');
+  assert.equal(b.intensityLabel, '先発 震度6弱・後発 震度6強');
+  assert.deepEqual({ ...a, intensityLabel: '' }, { ...b, intensityLabel: '' });
+});
+
+test('homeLagViewModel: 津波は合計だけに加わる（先発は変わらない）。津波の行は L2 と同じ形', () => {
+  const band = TSUNAMI_BANDS[2];
+  const a = homeLagViewModel(cell({ intensity: 5.6 }), cell({ intensity: 6.0 }), home(), 'none', null, LABELS);
+  const b = homeLagViewModel(cell({ intensity: 5.6 }), cell({ intensity: 6.0 }), home(), band, { min: 20, cm: 30 }, LABELS);
+  if (a.status !== 'ok' || b.status !== 'ok') return assert.fail('ok');
+  assert.deepEqual(a.stages![0], b.stages![0]);
+  assert.ok(pct(b.stages![1].collapse.central) >= pct(a.stages![1].collapse.central));
+  assert.equal(b.tsunami.kind, 'band');
+  assert.equal(a.tsunami.kind, 'none');
+});
+
+test('homeLagViewModel: 先発が データなし → nodata（後発だけで計算しない）。後発 null も nodata。outside は outside', () => {
+  assert.deepEqual(homeLagViewModel(null, cell(), home(), 'none', null, LABELS), { status: 'nodata' });
+  assert.deepEqual(homeLagViewModel(cell(), null, home(), 'none', null, LABELS), { status: 'nodata' });
+  assert.deepEqual(homeLagViewModel(cell({ intensity: null }), cell(), home(), 'none', null, LABELS), { status: 'nodata' });
+  assert.deepEqual(homeLagViewModel('outside', cell(), home(), 'none', null, LABELS), { status: 'outside' });
+  assert.deepEqual(homeLagViewModel(cell(), 'outside', home(), 'none', null, LABELS), { status: 'outside' });
+});
+
+test('areaLagViewModel: 10棟単位に丸める。合計は先発だけ以上。先発か後発の無いメッシュだけなら nostock', () => {
+  const stock = { a: { total: 1000, shares: { 'wood:pre1981': 1 } } };
+  const f = { a: cell({ intensity: 5.5 }) }, s = { a: cell({ intensity: 6 }) };
+  const lag = areaLagViewModel(f, s, stock, ['a']);
+  const first = areaViewModel(f, stock, ['a']);
+  assert.equal(lag.status, 'ok');
+  if (lag.status !== 'ok' || first.status !== 'ok') return;
+  assert.equal(lag.collapse % 10, 0);
+  assert.ok(lag.collapse >= first.collapse);
+  assert.deepEqual(areaLagViewModel(f, {}, stock, ['a']), { status: 'nostock' });
 });

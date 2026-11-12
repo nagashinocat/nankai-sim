@@ -2,7 +2,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import fixture from '../fixtures/fragility.synthetic.json' with { type: 'json' };
 import { useFragilityTable, shakeRates, type FragilityTable } from '../../src/core/fragility.ts';
-import { combine, ratesForCell, estimateHome, estimateLag } from '../../src/core/damage.ts';
+import { combine, ratesForCell, estimateHome, estimateLag, estimateHomeLag } from '../../src/core/damage.ts';
 import type { Era, HazardCell, Structure } from '../../src/core/types.ts';
 
 const structures: Structure[] = ['wood', 'steel', 'rc'];
@@ -211,4 +211,60 @@ test('estimateHome: tsunamiRange widens the range; central stays at cell depth',
   assert.ok(ranged.collapse[1] >= estimateHome(cell({ intensity: 6.0, tsunamiDepth: 3 }), input)!.collapse[1] - 1e-12);
   assert.ok(ranged.collapse[0] <= estimateHome(cell({ intensity: 6.0, tsunamiDepth: 1 }), input)!.collapse[0] + 1e-12);
   assert.deepEqual(estimateHome(c, input, undefined), base);
+});
+
+const unknownInput = { structure: 'unknown', era: 'unknown', retrofitted: false } as const;
+
+test('estimateHomeLag: 先発の幅は estimateHome(first) と一致', () => {
+  const first = cell({ intensity: 5.5 }), second = cell({ intensity: 6 });
+  const r = estimateHomeLag(first, second, unknownInput)!;
+  assert.deepEqual(r.first, estimateHome(first, unknownInput));
+});
+
+test('estimateHomeLag: 合計の下限・上限・中心は先発以上', () => {
+  for (const input of [unknownInput, { structure: 'wood', era: 'pre1981', retrofitted: true } as const]) {
+    const r = estimateHomeLag(cell({ intensity: 5.5 }), cell({ intensity: 6 }), input, [0, 2])!;
+    assert.ok(r.total.collapse[0] >= r.first.collapse[0] - 1e-12);
+    assert.ok(r.total.collapse[1] >= r.first.collapse[1] - 1e-12);
+    assert.ok(r.total.collapse[0] <= r.total.central.collapse + 1e-12 && r.total.central.collapse <= r.total.collapse[1] + 1e-12);
+    assert.ok(r.total.central.collapse >= r.first.central.collapse - 1e-12);
+  }
+});
+
+test('estimateHomeLag: 先発の震度 null → null、後発の震度 null → null', () => {
+  assert.equal(estimateHomeLag(cell({ intensity: null }), cell(), unknownInput), null);
+  assert.equal(estimateHomeLag(cell(), cell({ intensity: null }), unknownInput), null);
+});
+
+test('estimateHomeLag: 後発が震度 0 なら合計は先発とほぼ同じ', () => {
+  const r = estimateHomeLag(cell({ intensity: 6 }), cell({ intensity: 0 }), unknownInput)!;
+  assert.ok(Math.abs(r.total.central.collapse - r.first.central.collapse) < 1e-6);
+  assert.ok(Math.abs(r.total.collapse[1] - r.first.collapse[1]) < 1e-6);
+});
+
+test('estimateHomeLag: 津波は合計にのみ加わり、中心は後発セルの浸水深', () => {
+  const second = cell({ intensity: 6, tsunamiDepth: 1 });
+  const without = estimateHomeLag(cell({ intensity: 5.5 }), cell({ intensity: 6 }), unknownInput)!;
+  const withT = estimateHomeLag(cell({ intensity: 5.5 }), second, unknownInput, [0, 3])!;
+  assert.deepEqual(withT.first, without.first);
+  assert.ok(withT.total.collapse[1] >= without.total.collapse[1]);
+  assert.ok(withT.total.central.collapse > without.total.central.collapse);
+});
+
+test('estimateHomeLag: 単一組合せの合計は estimateLag と一致', () => {
+  const first = cell({ intensity: 5.5 }), second = cell({ intensity: 6 });
+  const r = estimateHomeLag(first, second, { structure: 'wood', era: 'pre1981', retrofitted: false })!;
+  const lag = estimateLag(first, second, 'wood', 'pre1981', undefined, 'rep')!;
+  close(r.total.central.collapse, lag.collapse);
+  close(r.total.central.half, lag.half);
+});
+
+test('estimateHomeLag: first.tsunamiDepth は先発・合計とも無視し、合計 >= 先発', () => {
+  const first = cell({ intensity: 5.5, tsunamiDepth: 3 }), second = cell({ intensity: 6 });
+  const r = estimateHomeLag(first, second, unknownInput)!;
+  assert.deepEqual(r.first, estimateHome({ ...first, tsunamiDepth: null }, unknownInput));
+  assert.deepEqual(r, estimateHomeLag({ ...first, tsunamiDepth: null }, second, unknownInput));
+  assert.ok(r.total.collapse[0] >= r.first.collapse[0] - 1e-12);
+  assert.ok(r.total.collapse[1] >= r.first.collapse[1] - 1e-12);
+  assert.ok(r.total.central.collapse >= r.first.central.collapse - 1e-12);
 });

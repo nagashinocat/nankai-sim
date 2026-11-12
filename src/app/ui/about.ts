@@ -1,5 +1,5 @@
 import type { Manifest } from '../data.ts';
-import { TSUNAMI_ATTRIBUTION } from '../text.ts';
+import { HALF_EXPLAIN, LAG_EXPLAIN, TSUNAMI_ATTRIBUTION, TSUNAMI_SCENARIO_NOTE } from '../text.ts';
 import { clear, el } from './dom.ts';
 
 export function renderAbout(root: HTMLElement, manifest: Manifest | null): void {
@@ -18,6 +18,11 @@ export function renderAbout(root: HTMLElement, manifest: Manifest | null): void 
       el('p', {}, '現在は静岡県・愛知県・岐阜県・三重県・和歌山県の想定データを使っています。それ以外の地域では「この地域はまだ対応していません」と表示します（揺れが小さいという意味ではありません）。'),
       el('p', {}, '自宅の結果は「代表値」と、曲線の読み取りの幅などによる「幅（最小〜最大）」で示します。わからない項目があるときは、幅が広くなります。'),
       el('p', {}, '避難場所までの時間は、直線距離を1.3倍して道のりとみなし、標準1.0m/s・ゆっくり0.5m/sで歩く場合の目安です。実際の道のり・坂・混雑・夜間などは考慮していません。')),
+    el('section', { class: 'card' },
+      el('h3', {}, '半割れ・時間差と臨時情報'),
+      el('p', {}, HALF_EXPLAIN),
+      el('p', {}, LAG_EXPLAIN),
+      el('p', {}, TSUNAMI_SCENARIO_NOTE)),
     el('section', { class: 'card' }, el('h3', {}, '出典'),
       el('p', {}, '内閣府 南海トラフの巨大地震モデル・被害想定手法検討会 ほか、次のデータを使っています。'), sources,
       el('p', {}, '地図: 国土地理院（淡色地図）。'),

@@ -212,3 +212,38 @@ test('tsunamiArrival: ファイルが404 → null', async () => {
   const ds = createDataSource(fake({}).fetcher);
   assert.equal(await ds.tsunamiArrival('尾鷲市'), null);
 });
+
+// ---- 半割れ（HALF_E / HALF_W） ----
+const HE = '/data/hazard/HALF_E', HW = '/data/hazard/HALF_W';
+const halfFiles = {
+  ...hazardFiles,
+  [`${HE}/index.json`]: ['523644'],
+  [`${HE}/523644.json`]: { '5236442023': [5.5, null, 1, 0, null] },
+  [`${HW}/index.json`]: ['523644'], // 523644.json は無い（404）
+};
+
+test('半割れ: ケースごとのファイルを読む。対応範囲は常に L2 の index', async () => {
+  const { fetcher, calls } = fake(halfFiles);
+  const ds = createDataSource(fetcher);
+  assert.equal(((await ds.hazardCell("HALF_E", "5236442023")) as { intensity: number }).intensity, 5.5);
+  assert.equal(await ds.hazardCell('HALF_E', '5300001111'), 'outside');
+  assert.ok(!calls.includes(`${HE}/index.json`), 'HALF の index.json は見ない');
+  assert.deepEqual(Object.keys(await ds.hazardFor('HALF_E', ['5236442023', '5236452011'])), ['5236442023']); // 523645 は HALF_E に無い
+  assert.equal(await ds.covers('HALF_E', '5236442023'), true);
+  assert.equal(await ds.covers('HALF_W', '5236449999'), false);
+  assert.equal((await ds.hazardFor('L2', ['5236442023']))['5236442023'].intensity, 6.5);
+});
+
+test('半割れ: そのケースのファイルが404/行が無い → null（データなし）・hazardFor は含めない。L2 は無事', async () => {
+  const ds = createDataSource(fake(halfFiles).fetcher);
+  assert.equal(await ds.hazardCell('HALF_W', '5236442023'), null);
+  assert.equal(await ds.hazardCell('HALF_E', '5236442024'), null); // 行が無い
+  assert.deepEqual(await ds.hazardFor('HALF_W', ['5236442023']), {});
+  assert.notEqual(await ds.hazardCell('L2', '5236442023'), null);
+});
+
+test('半割れ: 通信エラー（404以外）は例外', async () => {
+  const fetcher: Fetcher = async (url) =>
+    url.includes('HALF_E/523644') ? { ok: false, status: 500, json: async () => ({}) } : fake(halfFiles).fetcher(url);
+  await assert.rejects(createDataSource(fetcher).hazardCell('HALF_E', '5236442023'));
+});

@@ -71,4 +71,12 @@ ul.legend li { display: flex; align-items: center; gap: 8px; font-size: 1rem; }
 .home-pin { background: var(--accent); color: #fff; border: 3px solid #fff; border-radius: 50%; font-weight: 700; font-size: 0.8rem; text-align: center; line-height: 38px; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
 
 footer { margin-top: 24px; font-size: 1rem; }
+
+.tabs { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; margin: 0 0 10px; padding: 2px 0 6px; -webkit-overflow-scrolling: touch; scrollbar-width: thin; }
+.tab { flex: none; width: auto; margin: 0; padding: 8px 14px; white-space: nowrap; background: #fff; color: var(--accent); border-radius: 999px; }
+.tab[aria-selected="true"] { background: var(--accent); color: #fff; }
+.tabpanel:focus-visible { outline-offset: 4px; }
+.stage { border-top: 1px solid var(--line); margin-top: 8px; }
+.stage:first-of-type { border-top: 0; }
+
 [hidden] { display: none !important; }

@@ -1,5 +1,5 @@
-import { estimateHome } from '../core/damage.ts';
-import { estimateArea } from '../core/neighborhood.ts';
+import { estimateHome, estimateHomeLag } from '../core/damage.ts';
+import { estimateArea, estimateAreaLag } from '../core/neighborhood.ts';
 import { EVAC_START_MIN, WALK_SPEED, nearestShelters, reachBeforeTsunami } from '../core/evacuation.ts';
 import type { TsunamiBand } from '../core/tsunami.ts';
 import type { HomeTsunami } from './tsunami-tile.ts';
@@ -18,8 +18,12 @@ export type TsunamiVM =
       arrivalCaveat?: string }
   | { kind: 'none' }
   | { kind: 'unknown' };
+/** 時間差の1段階（先発、後発まで含めた合計）。 */
+export type StageVM = { label: string; collapse: RangeVM; half: RangeVM };
 export type HomeVM =
-  | { status: 'ok'; intensityLabel: string; collapse: RangeVM; half: RangeVM; liquefaction: string | null; tsunami: TsunamiVM; notes: string[] }
+  | { status: 'ok'; intensityLabel: string; collapse: RangeVM; half: RangeVM; liquefaction: string | null; tsunami: TsunamiVM; notes: string[];
+      /** 時間差のときだけ: [先発, 後発まで含めた合計]。collapse・half は合計と同じ（以前の保存・最大クラス・半割れには無い） */
+      stages?: StageVM[] }
   | { status: 'nodata' }
   | { status: 'outside' };
 export type OkHomeVM = Extract<HomeVM, { status: 'ok' }>;
@@ -107,28 +111,87 @@ export function homeViewModel(
   const cell: HazardCell = { ...baseCell, tsunamiDepth: band ? band.mid : tsunami === 'none' ? 0 : null };
   const est = estimateHome(cell, input, band ? [band.lo, band.hi] : undefined);
   if (!est || cell.intensity === null) return { status: 'nodata' };
+  const tsunamiVM = tsunamiVMOf(tsunami, band, arrival);
+  return {
+    status: 'ok',
+    intensityLabel: intensityLabel(cell.intensity),
+    collapse: rangeVM(est.collapse, est.central.collapse),
+    half: rangeVM(est.half, est.central.half),
+    liquefaction: liquefactionText(cell.settlementCm),
+    tsunami: tsunamiVM,
+    notes: notesOf(input),
+  };
+}
+
+const rangeVM = (r: [number, number], c: number): RangeVM => ({ min: formatPct(r[0]), max: formatPct(r[1]), central: formatPct(c) });
+
+function notesOf(input: HomeInput): string[] {
+  const notes: string[] = [];
+  if (input.structure === 'unknown' || input.era === 'unknown') notes.push(NOTE_UNKNOWN);
+  if ((input.structure === 'steel' || input.structure === 'rc') && (input.floors === undefined || input.floors === null)) notes.push(NOTE_FLOORS);
+  if (input.retrofitted) notes.push(NOTE_RETROFIT);
+  return notes;
+}
+
+function tsunamiVMOf(tsunami: HomeTsunami, band: TsunamiBand | null, arrival: Arrival | null): TsunamiVM {
+  const arrivalMin = arrival?.min ?? null;
   const hasArrival = arrivalMin !== null && Number.isFinite(arrivalMin);
   const caveat = hasArrival ? arrivalCaveatText(arrival!.cm) : null;
-  const tsunamiVM: TsunamiVM = band
+  return band
     ? { kind: typeof tsunami === 'object' && 'nearby' in tsunami ? 'nearby' : 'band', depth: band.label,
         arrival: hasArrival ? `海岸への到達 最短約${Math.round(arrivalMin!)}分（${arrivalHeightText(arrival!.cm)}）` : null,
         // 到達時間が不明または5分以内: 判定せず「すぐ高い所へ」（避難場所リストと同じ扱い）
         urgent: reachBeforeTsunami(0, arrivalMin) === 'n/a',
         ...(caveat ? { arrivalCaveat: caveat } : {}) }
     : { kind: tsunami as 'none' | 'unknown' };
-  const range = (r: [number, number], c: number): RangeVM => ({ min: formatPct(r[0]), max: formatPct(r[1]), central: formatPct(c) });
-  const notes: string[] = [];
-  if (input.structure === 'unknown' || input.era === 'unknown') notes.push(NOTE_UNKNOWN);
-  if ((input.structure === 'steel' || input.structure === 'rc') && (input.floors === undefined || input.floors === null)) notes.push(NOTE_FLOORS);
-  if (input.retrofitted) notes.push(NOTE_RETROFIT);
+}
+
+/** 自宅の場所の津波（どのタブでも同じ）。自宅の計算結果が無いタブ（データなし・読み込み失敗・読み込み中）でも津波の行を出すために使う。 */
+export function homeTsunamiVM(tsunami: HomeTsunami, arrival: Arrival | null): TsunamiVM {
+  const band: TsunamiBand | null = typeof tsunami !== 'object' ? null : 'nearby' in tsunami ? tsunami.nearby : tsunami;
+  return tsunamiVMOf(tsunami, band, arrival);
+}
+
+export const LAG_TOTAL_LABEL = '後発まで含めた合計';
+
+/**
+ * 時間差（先発→後発）の自宅。津波は合計にだけ加わる（後発のセル＋浸水深の幅。estimateHomeLag）。
+ * どちらかが範囲外なら outside、どちらかがデータなし（null・震度 null）なら nodata（先発が無いのに後発だけで計算しない）。
+ * collapse・half・tsunami・notes は合計のもの。stages = [先発, 合計]（labels の順）。
+ */
+export function homeLagViewModel(
+  firstCell: HazardCell | null | 'outside',
+  secondCell: HazardCell | null | 'outside',
+  input: HomeInput,
+  tsunami: HomeTsunami,
+  arrival: Arrival | null,
+  labels: readonly [string, string] = ['先発', LAG_TOTAL_LABEL],
+  /** 先発・後発の側の呼び名（例 ['東側','西側']）。渡すと震度の行が「先に東側で震度X、後に西側で震度Y」になる */
+  sides?: readonly [string, string],
+): HomeVM {
+  if (firstCell === 'outside' || secondCell === 'outside') return { status: 'outside' };
+  if (firstCell === null || secondCell === null) return { status: 'nodata' };
+  const band: TsunamiBand | null = typeof tsunami !== 'object' ? null : 'nearby' in tsunami ? tsunami.nearby : tsunami;
+  const second: HazardCell = { ...secondCell, tsunamiDepth: band ? band.mid : tsunami === 'none' ? 0 : null };
+  const est = estimateHomeLag(firstCell, second, input, band ? [band.lo, band.hi] : undefined);
+  if (!est || firstCell.intensity === null || second.intensity === null) return { status: 'nodata' };
+  const f = est.first, t = est.total;
+  // 液状化の沈下量は先発・後発のうち大きいほう（どちらも無ければ null）
+  const settlement = firstCell.settlementCm === null && second.settlementCm === null ? null : Math.max(firstCell.settlementCm ?? 0, second.settlementCm ?? 0);
   return {
     status: 'ok',
-    intensityLabel: intensityLabel(cell.intensity),
-    collapse: range(est.collapse, est.central.collapse),
-    half: range(est.half, est.central.half),
-    liquefaction: liquefactionText(cell.settlementCm),
-    tsunami: tsunamiVM,
-    notes,
+    intensityLabel: sides
+      ? `先に${sides[0]}で${intensityLabel(firstCell.intensity)}、後に${sides[1]}で${intensityLabel(second.intensity)}`
+      : `先発 ${intensityLabel(firstCell.intensity)}・後発 ${intensityLabel(second.intensity)}`,
+    collapse: rangeVM(t.collapse, t.central.collapse),
+    half: rangeVM(t.half, t.central.half),
+    liquefaction: liquefactionText(settlement),
+    tsunami: tsunamiVMOf(tsunami, band, arrival),
+    notes: notesOf(input),
+    stages: [
+      { label: labels[0], collapse: rangeVM(f.collapse, f.central.collapse), half: rangeVM(f.half, f.central.half) },
+      { label: labels[1], collapse: rangeVM(t.collapse, t.central.collapse), half: rangeVM(t.half, t.central.half) },
+    ],
   };
 }
 
@@ -158,6 +221,24 @@ export function areaViewModel(
   let a: ReturnType<typeof estimateArea>;
   try {
     a = estimateArea(cells, stock, meshes);
+  } catch {
+    return { status: 'unavailable' };
+  }
+  if (a.countedMeshes === 0) return { status: 'nostock' };
+  const r10 = (n: number) => Math.round(n / 10) * 10;
+  return { status: 'ok', collapse: r10(a.collapse), half: r10(a.half), meshes: a.countedMeshes };
+}
+
+/** 時間差（後発まで含めた合計）の周辺の棟数。先発・後発・建物のすべてがあるメッシュだけ数える。 */
+export function areaLagViewModel(
+  firstCells: Record<string, HazardCell>,
+  secondCells: Record<string, HazardCell>,
+  stock: Record<string, BuildingStock>,
+  meshes: string[],
+): AreaVM {
+  let a: ReturnType<typeof estimateAreaLag>;
+  try {
+    a = estimateAreaLag(firstCells, secondCells, stock, meshes);
   } catch {
     return { status: 'unavailable' };
   }

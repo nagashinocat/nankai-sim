@@ -2,20 +2,19 @@ import './style.css';
 import fragility from '../data/fragility.json';
 import { useFragilityTable } from '../core/fragility.ts';
 import { latLonToMesh250, meshCenter, meshesWithin } from '../core/mesh.ts';
-import { meshCollapseRate } from '../core/neighborhood.ts';
 import { WALK_SPEED, nearestShelters } from '../core/evacuation.ts';
-import type { HazardCell, HomeInput, LatLon } from '../core/types.ts';
+import type { HomeInput, LatLon } from '../core/types.ts';
 import { homeArrival } from './arrival.ts';
 import { TSUNAMI_TILE_ZOOM, canvasPixelReader, tsunamiAround, tsunamiAt } from './tsunami-tile.ts';
 import { createDataSource, type Manifest } from './data.ts';
 import { searchAddress } from './geocode.ts';
-import { areaViewModel, evacuationViewModel, homeViewModel, locationNote, type LocationSource } from './viewmodel.ts';
-import { buildShareText } from './text.ts';
+import { computeScenario, createScenarioRunner, type Scenario, type ScenarioContext, type ScenarioResult } from './scenario.ts';
+import { evacuationViewModel, homeTsunamiVM, type EvacVM, locationNote, type LocationSource } from './viewmodel.ts';
 import { DISCLAIMER, DISCLAIMER_DETAIL, clear, el } from './ui/dom.ts';
 import { clearLast, loadLast, saveLast, savedShelters } from './storage.ts';
 import { renderLast } from './ui/last.ts';
 import { renderInput } from './ui/input.ts';
-import { renderResult, type ResultData } from './ui/result.ts';
+import { renderResult } from './ui/result.ts';
 import { renderAbout } from './ui/about.ts';
 
 useFragilityTable(fragility as never);
@@ -59,15 +58,16 @@ function showLast(): void {
   }
 }
 
-function onResultShown(home: HomeInput, data: ResultData): void {
-  // 新しい結果が出たら「前回の結果」は下げる。結果が出たとき（自宅が ok）だけ保存する（範囲外・データなしは保存しない）。
+function onResultShown(home: HomeInput, municipality: string | null, evac: EvacVM[], r: ScenarioResult): void {
+  // 新しい結果が出たら「前回の結果」は下げる。結果が出たとき（自宅が ok）だけ保存する（範囲外・データなし・読み込み失敗は保存しない）。
+  // 選んでいるタブの結果を保存する（タブを替えるたびに、表示中のタブの結果に置き換わる）。
   // 住所・座標・「〜付近で計算しました」は保存しない。避難場所は名前と距離・徒歩の文字列だけ。
   clear(lastRoot);
   const st = localStore();
-  if (!st || data.home.status !== 'ok') return;
+  if (!st || r.home.status !== 'ok') return;
   saveLast({
-    v: 3, savedAt: new Date().toISOString(), municipality: data.municipality, input: home,
-    home: data.home, area: data.area, shelters: savedShelters(data.evac),
+    v: 4, scenario: r.scenario, savedAt: new Date().toISOString(), municipality, input: home,
+    home: r.home, area: r.area, shelters: savedShelters(evac),
   }, st);
 }
 // --------------------------------------------------------------------------
@@ -87,45 +87,62 @@ async function municipalityAround(pos: LatLon, mesh: string): Promise<string | n
   return ranked[0][0];
 }
 
+const runner = createScenarioRunner(ds);
+
 async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise<void> {
+  runner.invalidate(); // 前の場所のタブの計算が、あとから新しい結果に混ざらないように
   clear(resultRoot); // 読み込みに失敗したとき、前の場所の結果を残さない
   const mesh = latLonToMesh250(pos);
-  const cell = await ds.hazardCell('L2', mesh);
+  await ds.hazardCell('L2', mesh); // 先に読み込みの失敗を出す（computeScenario が同じ値を使う）
   const meshes = meshesWithin(pos, 1000);
-  const [rawCells, stock, municipality, shelters, homeTsunami] = await Promise.all([
-    ds.hazardFor('L2', meshes), ds.stockFor(meshes), municipalityAround(pos, mesh), ds.sheltersNear(pos, 5000),
+  const [stock, municipality, shelters, homeTsunami] = await Promise.all([
+    ds.stockFor(meshes), municipalityAround(pos, mesh), ds.sheltersNear(pos, 5000),
     tsunamiAround(pos, tileReader), // 中心が浸水域外なら約50mの8方向も見る（Ruling F3）
   ]);
     // 推測した市町名（municipality）は表示用。到達時間は自宅のマス自身の市町村だけから引く。
   const arrival = await homeArrival(ds, mesh);
-  // 周辺: 各マス中心の浸水深の段階の代表値（浸水域外は0、判定できないマスは津波なし）。
-  const cells: Record<string, HazardCell> = { ...rawCells };
-  await Promise.all(meshes.map(async (m) => {
-    const c = rawCells[m];
-    if (!c) return;
-    const t = await tsunamiAt(meshCenter(m), tileReader, AREA_TSUNAMI_ZOOM);
-    cells[m] = { ...c, tsunamiDepth: t === 'unknown' ? null : t === 'none' ? 0 : t.mid };
-  }));
-  const homeVM = homeViewModel(cell, home, homeTsunami, arrival);
+  // 周辺: 各マス中心の浸水深の段階の代表値（浸水域外は0、判定できないマスは津波なし）。シナリオ間で同じ値を使い回す。
+  const depths = new Map<string, Promise<number | null>>();
+  const ctx: ScenarioContext = {
+    mesh, meshes, input: home, homeTsunami, arrival, stock,
+    areaTsunamiDepth: (m) => {
+      let p = depths.get(m);
+      if (!p) {
+        p = tsunamiAt(meshCenter(m), tileReader, AREA_TSUNAMI_ZOOM).then((t) => (t === 'unknown' ? null : t === 'none' ? 0 : t.mid));
+        depths.set(m, p);
+      }
+      return p;
+    },
+  };
+  const l2 = await computeScenario(ds, ctx, 'L2');
   const evac = evacuationViewModel(pos, shelters, arrival);
   const evacShelters = evac.map((e) =>
     nearestShelters(pos, shelters, { hazard: e.hazard, speedMps: WALK_SPEED.standard, limit: 5 }).map((h) => h.shelter),
   );
-  const meshRates = meshes.map((m) => {
-    // null = データなし（ハザードか建物データが無い、ハザードが無効、または建物データが不正）
-    let rate: number | null = null;
-    try { rate = cells[m] && stock[m] ? meshCollapseRate(cells[m], stock[m]) : null; } catch { /* 不正な建物データは「データなし」 */ }
-    return { mesh: m, rate };
-  });
-  const data: ResultData = {
-    pos, municipality, home: homeVM,
-    area: areaViewModel(cells, stock, meshes),
-    meshRates, evac, evacShelters,
-    shareText: homeVM.status === 'ok' ? buildShareText(municipality, homeVM.collapse, homeVM.half) : null,
-    locationNote: locationNote(where),
+  // タブの結果は場所ごとに覚えておく（読み込めなかったものは覚えず、「もう一度読み込む」で再試行）
+  const cache = new Map<Scenario, ScenarioResult>([['L2', l2]]);
+  runner.invalidate();
+  const show = async (scenario: Scenario): Promise<void> => {
+    const hit = cache.get(scenario);
+    if (hit) { runner.invalidate(); handle.showResult(hit); return; }
+    handle.showLoading(scenario);
+    let r: ScenarioResult | null;
+    try {
+      r = await runner.request(ctx, scenario);
+    } catch {
+      r = { scenario, home: { status: 'error' }, area: { status: 'unavailable' }, meshRates: ctx.meshes.map((m) => ({ mesh: m, rate: null })) };
+    }
+    if (!r) return; // 後から選ばれたタブ・別の場所の要求に追い越された
+    if (r.home.status !== 'error') cache.set(scenario, r);
+    handle.showResult(r);
   };
-  renderResult(resultRoot, data);
-  onResultShown(home, data);
+  const handle = renderResult(resultRoot, {
+    pos, municipality, result: l2, evac, evacShelters, locationNote: locationNote(where), tsunami: homeTsunamiVM(homeTsunami, arrival),
+  }, {
+    onSelect: (s) => void show(s),
+    onRetry: (s) => void show(s),
+    onShown: (r) => onResultShown(home, municipality, evac, r),
+  });
 }
 
 const view = renderInput(inputRoot, {

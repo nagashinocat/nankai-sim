@@ -39,6 +39,36 @@ export type ActionsInput = {
   onSelectShelter?(index: number): void;
 };
 
+/** 共有の欄（文面は市町村名と結果だけ。結果が無いときは案内だけ）。 */
+function shareBody(shareText: string | null): Node[] {
+  const body: Node[] = [];
+  if (shareText) {
+    const ta = el('textarea', { id: 'share-text', rows: 6, readOnly: true }, '');
+    ta.value = shareText;
+    const btn = el('button', { type: 'button', class: 'secondary' }, '家族に共有する');
+    const msg = el('p', { class: 'status', role: 'status' });
+    btn.addEventListener('click', async () => {
+      try {
+        if (navigator.share) await navigator.share({ text: ta.value });
+        else {
+          await navigator.clipboard.writeText(ta.value);
+          msg.textContent = 'コピーしました。メッセージアプリなどに貼り付けてください。';
+        }
+      } catch (e) {
+        if ((e as Error).name !== 'AbortError') msg.textContent = '共有できませんでした。上の文面を長押ししてコピーしてください。';
+      }
+    });
+    body.push(el('p', { class: 'hint' }, '共有される文面です。住所・位置情報は含まれません。'), ta, btn, msg);
+  } else body.push(el('p', {}, '結果が出ると、市町村名と結果だけの文面を共有できます。'));
+  return body;
+}
+
+/** 結果のタブを切り替えたとき、共有の文面を表示中のタブの結果に合わせる。 */
+export function updateShare(actions: HTMLElement, shareText: string | null): void {
+  const card = actions.querySelector('#share-card');
+  if (card) card.replaceChildren(el('h3', {}, '4. 家族に共有する'), ...shareBody(shareText));
+}
+
 export function renderActions(input: ActionsInput): HTMLElement {
   // 1. 避難
   const evacBody: (Node | string)[] = [];
@@ -68,27 +98,7 @@ export function renderActions(input: ActionsInput): HTMLElement {
   const checklist = el('ul', { class: 'checklist' }, ...CHECKLIST.map((t, i) => el('li', {}, boxes[i], el('label', { for: `chk-${i}` }, t))));
   checklist.addEventListener('change', () => { if (st) saveChecklist(boxes.map((b) => b.checked), st); });
 
-  // 4. 共有
-  const shareBody: Node[] = [];
-  if (input.shareText) {
-    const ta = el('textarea', { id: 'share-text', rows: 6, readOnly: true }, '');
-    ta.value = input.shareText;
-    const btn = el('button', { type: 'button', class: 'secondary' }, '家族に共有する');
-    const msg = el('p', { class: 'status', role: 'status' });
-    btn.addEventListener('click', async () => {
-      try {
-        if (navigator.share) await navigator.share({ text: ta.value });
-        else {
-          await navigator.clipboard.writeText(ta.value);
-          msg.textContent = 'コピーしました。メッセージアプリなどに貼り付けてください。';
-        }
-      } catch (e) {
-        if ((e as Error).name !== 'AbortError') msg.textContent = '共有できませんでした。上の文面を長押ししてコピーしてください。';
-      }
-    });
-    shareBody.push(el('p', { class: 'hint' }, '共有される文面です。住所・位置情報は含まれません。'), ta, btn, msg);
-  } else shareBody.push(el('p', {}, '結果が出ると、市町村名と結果だけの文面を共有できます。'));
-
+  // 4. 共有（結果のタブが変わったら updateShare で差し替える）
   const card = (title: string, ...body: (Node | string)[]) => el('section', { class: 'card action' }, el('h3', {}, title), ...body);
   return el(
     'div',
@@ -97,6 +107,6 @@ export function renderActions(input: ActionsInput): HTMLElement {
     card('1. 避難先と経路を確認する', ...evacBody),
     card('2. 家の耐震を調べる', ...seismic),
     card('3. 備えを確認する', checklist),
-    card('4. 家族に共有する', ...shareBody),
+    el('section', { class: 'card action', id: 'share-card' }, el('h3', {}, '4. 家族に共有する'), ...shareBody(input.shareText)),
   );
 }

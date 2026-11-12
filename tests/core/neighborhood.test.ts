@@ -67,3 +67,29 @@ test('BuildingStock の不正値は Error（FragilityDataMissingError ではな�
   bad({ total: 10, shares: { 'wood:pre1981': NaN } });
   assert.throws(() => estimateArea({ a: c }, { a: { total: NaN, shares: { 'wood:pre1981': 1 } } }, ['a']), Error);
 });
+
+// ---- 時間差（先発→後発）の周辺推計 ----
+import { estimateLag } from '../../src/core/damage.ts';
+import { estimateAreaLag, meshLagCollapseRate } from '../../src/core/neighborhood.ts';
+
+test('meshLagCollapseRate / estimateAreaLag: 全部 wood:pre1981 なら estimateLag(rep) の全壊率 × 棟数', () => {
+  const f = cell({ intensity: 5.5, tsunamiDepth: 3 }), s = cell({ intensity: 6, tsunamiDepth: 2 });
+  // 先発の津波は無視する（先発は揺れ・液状化だけ）
+  const expect = estimateLag({ ...f, tsunamiDepth: null }, s, 'wood', 'pre1981', undefined, 'rep')!;
+  close(meshLagCollapseRate(f, s, wood100)!, expect.collapse);
+  const out = estimateAreaLag({ a: f }, { a: s }, { a: wood100 }, ['a']);
+  close(out.collapse, 100 * expect.collapse);
+  close(out.half, 100 * expect.half);
+  assert.equal(out.countedMeshes, 1);
+});
+
+test('estimateAreaLag: 先発・後発・建物のどれかが無い/無効なメッシュは数えない。合計は先発だけ以上', () => {
+  const f = { a: cell({ intensity: 5.5 }), b: cell({ intensity: 5.5 }), c: cell({ intensity: 5.5 }), d: cell({ intensity: null }) };
+  const s = { a: cell({ intensity: 6 }), c: cell({ intensity: 6 }), d: cell({ intensity: 6 }) };
+  const st = { a: wood100, b: wood100, d: wood100 };
+  const out = estimateAreaLag(f, s, st, ['a', 'b', 'c', 'd', 'e']);
+  assert.equal(out.countedMeshes, 1); // a だけ（b は後発なし、c は建物なし、d は先発の震度 null）
+  assert.ok(out.collapse >= estimateArea({ a: f.a }, { a: wood100 }, ['a']).collapse - 1e-9);
+  assert.equal(meshLagCollapseRate(cell({ intensity: null }), cell(), wood100), null);
+  assert.equal(meshLagCollapseRate(cell(), cell({ intensity: null }), wood100), null);
+});
