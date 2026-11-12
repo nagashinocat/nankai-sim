@@ -16,7 +16,8 @@ function fake(files: Record<string, unknown>) {
 const H = '/data/hazard/L2';
 const hazardFiles = {
   [`${H}/index.json`]: ['523644', '523645'],
-  [`${H}/523644.json`]: { '5236442023': [6.5, 12.3, 4.5, 2.1, 25], '5236442024': [5.0, null, null, null, null] },
+  // 5236442026 = 4県内だが想定値が無い（全項目 null の行）。行の無い 5236449999 は4県外（隣県）
+  [`${H}/523644.json`]: { '5236442023': [6.5, 12.3, 4.5, 2.1, 25], '5236442024': [5.0, null, null, null, null], '5236442026': [null, null, null, null, null] },
   [`${H}/523645.json`]: { '5236452011': [6.0, 1, 2, 3, 4] },
 };
 
@@ -37,10 +38,12 @@ test('hazardCell: 対応範囲（index.json）に無い2次メッシュは outsi
   assert.deepEqual(calls, [`${H}/index.json`]);
 });
 
-test('covers: index.json に載っている2次メッシュだけ true', async () => {
+test('covers: 250m メッシュ単位（Ruling F1）。index.json にあり、ファイルに行がある（null の行も）メッシュだけ true', async () => {
   const ds = createDataSource(fake(hazardFiles).fetcher);
   assert.equal(await ds.covers('L2', '5236442023'), true);
   assert.equal(await ds.covers('L2', '5236452011'), true);
+  assert.equal(await ds.covers('L2', '5236442026'), true); // 4県内・想定値なし
+  assert.equal(await ds.covers('L2', '5236449999'), false); // 同じ2次メッシュの隣県のメッシュ
   assert.equal(await ds.covers('L2', '5300001111'), false);
 });
 
@@ -71,9 +74,14 @@ test('hazardCell: 失敗は覚えず、再試行で取り直す', async () => {
   assert.equal(calls.filter((c) => c.endsWith('/523644.json')).length, 2);
 });
 
-test('hazardCell: ファイルはあるがメッシュが無ければ null', async () => {
+test('hazardCell: ファイルはあるがメッシュの行が無い（4県外の隣県のメッシュ）→ outside（Ruling F1）', async () => {
   const ds = createDataSource(fake(hazardFiles).fetcher);
-  assert.equal(await ds.hazardCell('L2', '5236449999'), null);
+  assert.equal(await ds.hazardCell('L2', '5236449999'), 'outside');
+});
+
+test('hazardCell: 4県内で想定値の無いメッシュ（全項目 null の行）→ null（データなし。outside とは別）', async () => {
+  const ds = createDataSource(fake(hazardFiles).fetcher);
+  assert.equal(await ds.hazardCell('L2', '5236442026'), null);
 });
 
 test('同じ2次メッシュは1回だけ取得する（404も）', async () => {
@@ -94,7 +102,7 @@ test('hazardFor: 対応範囲内のファイルが読めなければ読み込み
 
 test('hazardFor: 複数の2次メッシュにまたがり、無いセルと範囲外は含めない', async () => {
   const ds = createDataSource(fake(hazardFiles).fetcher);
-  const r = await ds.hazardFor('L2', ['5236442023', '5236452011', '5236449999', '5300001111']);
+  const r = await ds.hazardFor('L2', ['5236442023', '5236452011', '5236449999', '5236442026', '5300001111']);
   assert.deepEqual(Object.keys(r).sort(), ['5236442023', '5236452011']);
   assert.equal(r['5236452011']!.tsunamiArrivalMin, 4);
 });
@@ -185,4 +193,22 @@ test('静的ホストが無いファイルを index.html（200）で返す（W6�
     ? { ok: true, status: 200, json: async () => ['523644'] }
     : html(url);
   await assert.rejects(createDataSource(mixed).hazardCell('L2', '5236442023'));
+});
+
+test('tsunamiArrival: 市町村名で {min, cm} を返す。min が null（「－」）もそのまま。無い名前は null', async () => {
+  const ds = createDataSource(fake({ '/data/tsunami_arrival.json': { 尾鷲市: { min: 3, cm: 30 }, 朝日町: { min: null, cm: 30 }, 熱海市: { min: 24, cm: 50 } } }).fetcher);
+  assert.deepEqual(await ds.tsunamiArrival('尾鷲市'), { min: 3, cm: 30 });
+  assert.deepEqual(await ds.tsunamiArrival('熱海市'), { min: 24, cm: 50 });
+  assert.deepEqual(await ds.tsunamiArrival('朝日町'), { min: null, cm: 30 });
+  assert.equal(await ds.tsunamiArrival('どこかの市'), null);
+});
+
+test('tsunamiArrival: 形の違う値（古い形式の数値・cm 無し・文字列）は null', async () => {
+  const ds = createDataSource(fake({ '/data/tsunami_arrival.json': { 旧: 3, 無cm: { min: 3 }, 文字: { min: '3', cm: 30 }, 負: { min: 3, cm: -1 }, ヌル: null } }).fetcher);
+  for (const m of ['旧', '無cm', '文字', '負', 'ヌル']) assert.equal(await ds.tsunamiArrival(m), null, m);
+});
+
+test('tsunamiArrival: ファイルが404 → null', async () => {
+  const ds = createDataSource(fake({}).fetcher);
+  assert.equal(await ds.tsunamiArrival('尾鷲市'), null);
 });

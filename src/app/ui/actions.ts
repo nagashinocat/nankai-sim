@@ -24,6 +24,14 @@ export function directionsUrl(dest: LatLon): string {
 
 const link = (href: string, text: string) => el('a', { href, target: '_blank', rel: 'noopener noreferrer', class: 'btn-link' }, text);
 
+/** 耐震補助の検索リンク。市町村名だけを使う（住所・座標は入れない）。名前が不明なときは一般的な検索語。 */
+export function subsidySearchUrl(municipality: string | null): string {
+  return `https://www.google.com/search?q=${encodeURIComponent(`${municipality ?? ''} 木造住宅 耐震診断 補助`.trim())}`;
+}
+export function subsidySearchLabel(municipality: string | null): string {
+  return municipality ? `${municipality}の耐震補助制度を検索する` : 'お住まいの市町村の耐震補助制度を検索する';
+}
+
 export type ActionsInput = {
   shelters: Shelter[]; // 画面に一覧した順（地震用）
   municipality: string | null;
@@ -47,11 +55,10 @@ export function renderActions(input: ActionsInput): HTMLElement {
   evacBody.push(link('https://disaportal.gsi.go.jp/', 'ハザードマップポータルサイトで周辺の危険を見る'));
 
   // 2. 耐震
-  const q = encodeURIComponent(`${input.municipality ?? ''} 木造住宅 耐震診断 補助`.trim());
   const seismic = [
     el('p', {}, '古い木造住宅は、専門家による診断と補強で被害を減らせる場合があります。'),
     link('https://www.kenchiku-bosai.or.jp/taishin_portal/', '日本建築防災協会「誰でもできるわが家の耐震診断」'),
-    link(`https://www.google.com/search?q=${q}`, input.municipality ? `${input.municipality}の耐震補助制度を検索する` : 'お住まいの市町の耐震補助制度を検索する'),
+    link(subsidySearchUrl(input.municipality), subsidySearchLabel(input.municipality)),
   ];
 
   // 3. 備え
@@ -80,7 +87,7 @@ export function renderActions(input: ActionsInput): HTMLElement {
       }
     });
     shareBody.push(el('p', { class: 'hint' }, '共有される文面です。住所・位置情報は含まれません。'), ta, btn, msg);
-  } else shareBody.push(el('p', {}, '結果が出ると、市町名と結果だけの文面を共有できます。'));
+  } else shareBody.push(el('p', {}, '結果が出ると、市町村名と結果だけの文面を共有できます。'));
 
   const card = (title: string, ...body: (Node | string)[]) => el('section', { class: 'card action' }, el('h3', {}, title), ...body);
   return el(

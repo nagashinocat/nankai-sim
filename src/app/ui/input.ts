@@ -34,7 +34,7 @@ const STRUCTURES: [Structure | 'unknown', string][] = [
 
 export function renderInput(root: HTMLElement, handlers: InputHandlers): InputView {
   clear(root);
-  const address = el('input', { id: 'f-address', type: 'text', autocomplete: 'off', placeholder: '例：三重県三重郡菰野町大字吉澤1306', enterkeyhint: 'search' });
+  const address = el('input', { id: 'f-address', type: 'text', autocomplete: 'off', placeholder: '例：愛知県名古屋市中区三の丸3丁目1', enterkeyhint: 'search' });
   const era = el('select', { id: 'f-era' }, ...ERAS.map(([v, t]) => el('option', { value: v }, t)));
   era.value = 'unknown';
   const structure = el('select', { id: 'f-structure' }, ...STRUCTURES.map(([v, t]) => el('option', { value: v }, t)));

@@ -1,10 +1,12 @@
 import './style.css';
 import fragility from '../data/fragility.json';
 import { useFragilityTable } from '../core/fragility.ts';
-import { latLonToMesh250, meshesWithin } from '../core/mesh.ts';
+import { latLonToMesh250, meshCenter, meshesWithin } from '../core/mesh.ts';
 import { meshCollapseRate } from '../core/neighborhood.ts';
 import { WALK_SPEED, nearestShelters } from '../core/evacuation.ts';
-import type { HomeInput, LatLon } from '../core/types.ts';
+import type { HazardCell, HomeInput, LatLon } from '../core/types.ts';
+import { homeArrival } from './arrival.ts';
+import { TSUNAMI_TILE_ZOOM, canvasPixelReader, tsunamiAround, tsunamiAt } from './tsunami-tile.ts';
 import { createDataSource, type Manifest } from './data.ts';
 import { searchAddress } from './geocode.ts';
 import { areaViewModel, evacuationViewModel, homeViewModel, locationNote, type LocationSource } from './viewmodel.ts';
@@ -20,6 +22,9 @@ useFragilityTable(fragility as never);
 
 const fetcher = (url: string) => fetch(url);
 const ds = createDataSource(fetcher, `${import.meta.env.BASE_URL}data`);
+const tileReader = canvasPixelReader();
+/** 周辺1kmの各マス中心の津波は、タイル数を抑えるため2段階粗いズーム（約1.2km四方のタイル）で読む。 */
+const AREA_TSUNAMI_ZOOM = TSUNAMI_TILE_ZOOM - 2;
 
 const app = document.getElementById('app')!;
 const inputRoot = el('div', { id: 'input' });
@@ -61,7 +66,7 @@ function onResultShown(home: HomeInput, data: ResultData): void {
   const st = localStore();
   if (!st || data.home.status !== 'ok') return;
   saveLast({
-    v: 2, savedAt: new Date().toISOString(), municipality: data.municipality, input: home,
+    v: 3, savedAt: new Date().toISOString(), municipality: data.municipality, input: home,
     home: data.home, area: data.area, shelters: savedShelters(data.evac),
   }, st);
 }
@@ -86,13 +91,23 @@ async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise
   clear(resultRoot); // 読み込みに失敗したとき、前の場所の結果を残さない
   const mesh = latLonToMesh250(pos);
   const cell = await ds.hazardCell('L2', mesh);
-  const hazard = cell === 'outside' ? null : cell;
   const meshes = meshesWithin(pos, 1000);
-  const [cells, stock, municipality, shelters] = await Promise.all([
+  const [rawCells, stock, municipality, shelters, homeTsunami] = await Promise.all([
     ds.hazardFor('L2', meshes), ds.stockFor(meshes), municipalityAround(pos, mesh), ds.sheltersNear(pos, 5000),
+    tsunamiAround(pos, tileReader), // 中心が浸水域外なら約50mの8方向も見る（Ruling F3）
   ]);
-  const homeVM = homeViewModel(cell, home);
-  const evac = evacuationViewModel(pos, shelters, hazard);
+    // 推測した市町名（municipality）は表示用。到達時間は自宅のマス自身の市町村だけから引く。
+  const arrival = await homeArrival(ds, mesh);
+  // 周辺: 各マス中心の浸水深の段階の代表値（浸水域外は0、判定できないマスは津波なし）。
+  const cells: Record<string, HazardCell> = { ...rawCells };
+  await Promise.all(meshes.map(async (m) => {
+    const c = rawCells[m];
+    if (!c) return;
+    const t = await tsunamiAt(meshCenter(m), tileReader, AREA_TSUNAMI_ZOOM);
+    cells[m] = { ...c, tsunamiDepth: t === 'unknown' ? null : t === 'none' ? 0 : t.mid };
+  }));
+  const homeVM = homeViewModel(cell, home, homeTsunami, arrival);
+  const evac = evacuationViewModel(pos, shelters, arrival);
   const evacShelters = evac.map((e) =>
     nearestShelters(pos, shelters, { hazard: e.hazard, speedMps: WALK_SPEED.standard, limit: 5 }).map((h) => h.shelter),
   );

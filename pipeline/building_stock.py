@@ -3,22 +3,29 @@
 国勢調査メッシュ（世帯総数）+ 小地域境界 + 住宅・土地統計（構造×建築時期）+
 固定資産概要調書（市町の棟数）→ メッシュ別の建物棟数と構造×年代の割合。
 
+県ごとに実行する（--pref 21/22/23/24）。出力は既定で build/data-build/<pref>/stock/。
+4県分を pipeline.merge で public/data/stock/ に統合する。
+
 出力: {out_dir}/{mesh2}.json = {"<mesh250>": {"total": 棟数, "shares": {"wood:pre1981": ..}}}
       {out_dir}/municipality_meshes.json = {市町名: [mesh250, ...]}
 """
 import argparse
+import csv
 import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+from typing import Callable
 
 import geopandas as gpd
 import pandas as pd
 
-from pipeline.manifest import update_manifest
+from pipeline.manifest import update_manifest, update_manifest_pref
+from pipeline.prefs import PREFS
 
-PREF = "三重県"
+PREF = PREFS["24"]  # parse_housing_6_3（三重県の第6-3表）の県計ブロック名
+ESTAT_HOUSING = "estat_r5_6-3-2_tokai_raw.csv"
 ERAS = ("pre1981", "y1981_2000", "post2000")
 STRUCTS = ("wood", "rc", "steel")
 KEYS = [f"{s}:{e}" for s in STRUCTS for e in ERAS]
@@ -136,6 +143,70 @@ def parse_housing_6_3(txt: Path) -> dict[str, dict[str, float]]:
     return out
 
 
+_ESTAT_COLS = ["name"] + [f"{s}_{e.removeprefix('y')}" for s in STRUCTS for e in ERAS]
+
+
+def parse_housing_estat_csv(path: Path) -> dict[str, dict[str, float]]:
+    """e-Stat 令和5年住宅・土地統計調査 表6-3-2 を構造3区分×年代3区分に集計済みの CSV を読む。
+
+    列: name,wood_pre1981,wood_1981_2000,wood_post2000,rc_...,steel_...。行は県計と市町村（政令市は市全体）。
+    戻り値は parse_housing_6_3 と同じ形（名前 → {"wood:pre1981": 住宅数, ...}）。"-" は 0。名前の重複は ValueError。
+    """
+    out: dict[str, dict[str, float]] = {}
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        header = [h.strip() for h in next(reader)]
+        if header != _ESTAT_COLS:
+            raise ValueError(f"{path}: 列が想定と違う: {header}")
+        for i, row in enumerate(reader, start=2):
+            if not row or not row[0].strip():
+                continue
+            name = row[0].strip()
+            if name in out:
+                raise ValueError(f"{path}:{i}: 名前 {name} が重複")
+            if len(row) != len(_ESTAT_COLS):
+                raise ValueError(f"{path}:{i}: 列数が違う: {row}")
+            vals = {}
+            for col, tok in zip(_ESTAT_COLS[1:], row[1:]):
+                tok = tok.strip()
+                if not _NUM.match(tok):
+                    raise ValueError(f"{path}:{i}: 数値でない: {tok!r}")
+                s_, e_ = col.split("_", 1)
+                vals[f"{s_}:{e_ if e_ in ERAS else 'y' + e_}"] = _num(tok)
+            out[name] = vals
+    return out
+
+
+@dataclass(frozen=True)
+class PrefInputs:
+    code: str
+    name: str
+    boundary: Path
+    housing: Path
+    parse_housing: Callable[[Path], dict[str, dict[str, float]]]
+
+
+def pref_inputs(code: str, raw: Path) -> PrefInputs:
+    """県コード → 県名・境界ファイル・住宅統計ファイルとその読み方。"""
+    if code not in PREFS:
+        raise ValueError(f"未対応の県コード: {code}（{', '.join(PREFS)}）")
+    raw = Path(raw)
+    if code == "24":
+        housing, parser = raw / "housing" / "mie_housing_r5.txt", parse_housing_6_3
+    else:
+        housing, parser = raw / "housing" / ESTAT_HOUSING, parse_housing_estat_csv
+    return PrefInputs(code, PREFS[code], raw / "boundary" / f"r2ka{code}.shp", housing, parser)
+
+
+_WARD = re.compile(r"^(.+?市).+区$")
+
+
+def municipality_name(city_name: str) -> str:
+    """境界の CITY_NAME → 市町村名。政令指定都市の区は市にまとめる（例: 名古屋市千種区 → 名古屋市）。"""
+    m = _WARD.match(city_name)
+    return m.group(1) if m else city_name
+
+
 # --- 固定資産概要調書 ---
 def parse_kotei(xlsx: Path, pref: str) -> dict[str, tuple[int, int]]:
     """市町名 → (木造棟数, 木造以外棟数)"""
@@ -193,14 +264,20 @@ def _shares(housing: dict[str, float], wood_n: int, non_n: int) -> dict[str, flo
     return {k: v / s for k, v in shares.items()}
 
 
-def build_stock_full(census_dir, boundary_shp, housing, kotei, out_dir) -> StockResult:
+def build_stock_full(census_dir, boundary_shp, housing, kotei, out_dir, pref: str = "24") -> StockResult:
+    if pref not in PREFS:
+        raise ValueError(f"未対応の県コード: {pref}")
+    pref_name = PREFS[pref]
     out_dir = Path(out_dir)
     hh = {m: v for m, v in read_households(census_dir).items() if v > 0}
-    stock_h = parse_housing_6_3(housing)
-    pref_h = stock_h[PREF]
-    counts = parse_kotei(kotei, PREF)
+    stock_h = (parse_housing_6_3 if pref == "24" else parse_housing_estat_csv)(housing)
+    if pref_name not in stock_h:
+        raise ValueError(f"{housing}: 県計 {pref_name} がない")
+    pref_h = stock_h[pref_name]
+    counts = parse_kotei(kotei, pref_name)
 
     bnd = gpd.read_file(boundary_shp).to_crs("EPSG:6668")
+    bnd["CITY_NAME"] = bnd["CITY_NAME"].map(municipality_name)
     munis = bnd[["CITY_NAME", "geometry"]].dissolve(by="CITY_NAME").reset_index()
     centers = [mesh_center(m) for m in hh]
     pts = gpd.GeoDataFrame(
@@ -250,33 +327,41 @@ def build_stock_full(census_dir, boundary_shp, housing, kotei, out_dir) -> Stock
     (out_dir / "municipality_meshes.json").write_text(
         json.dumps(muni_meshes, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
     )
+    table = "第6-3表" if pref == "24" else "表6-3-2"
     notes = (
         "メッシュ中心点を含む市町に割り当て、固定資産の棟数（木造・木造以外）を世帯総数で按分。"
-        "構造×年代の割合は住宅・土地統計 第6-3表（建築時期は1970以前+1971-80=pre1981、1981-2000、2001以降=post2000。構造は木造・RC・鉄骨、その他は除外）を木造/非木造の棟数比で重み付け。"
+        f"構造×年代の割合は住宅・土地統計 {table}（建築時期は1970以前+1971-80=pre1981、1981-2000、2001以降=post2000。構造は木造・RC・鉄骨、その他は除外）を木造/非木造の棟数比で重み付け。"
     )
     if fallback:
-        notes += "住宅・土地統計に市町の値がなく県計の割合で代用: " + "、".join(fallback) + "。"
+        notes += f"住宅・土地統計に市町の値がなく県計（{pref_name}）の割合で代用: " + "、".join(fallback) + "。"
     else:
-        notes += "県計割合での代用なし。"
+        notes += f"県計（{pref_name}）割合での代用なし。"
     return StockResult(totals, fallback, muni_meshes, notes, allocated)
 
 
-def build_stock(census_dir, boundary_shp, housing, kotei, out_dir) -> dict[str, int]:
-    return build_stock_full(census_dir, boundary_shp, housing, kotei, out_dir).totals
+def build_stock(census_dir, boundary_shp, housing, kotei, out_dir, pref: str = "24") -> dict[str, int]:
+    return build_stock_full(census_dir, boundary_shp, housing, kotei, out_dir, pref).totals
 
 
-def main() -> None:
+def parse_args(argv=None) -> argparse.Namespace:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--pref", required=True, choices=sorted(PREFS), help="県コード（2桁）")
     ap.add_argument("--raw", default="data/raw", type=Path)
-    ap.add_argument("--out", default="public/data/stock", type=Path)
+    ap.add_argument("--out", type=Path, help="既定 build/data-build/<pref>/stock")
     ap.add_argument("--manifest", default="public/data/manifest.json", type=Path)
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
+    if a.out is None:
+        a.out = Path("build/data-build") / a.pref / "stock"
+    return a
+
+
+def main(argv=None) -> None:
+    a = parse_args(argv)
     raw = a.raw
+    p = pref_inputs(a.pref, raw)
     kotei = raw / "kotei" / "kotei_r06_soukatsu.xlsx"
-    r = build_stock_full(
-        raw / "census_mesh", raw / "boundary" / "r2ka24.shp", raw / "housing" / "mie_housing_r5.txt", kotei, a.out
-    )
-    counts = parse_kotei(kotei, PREF)
+    r = build_stock_full(raw / "census_mesh", p.boundary, p.housing, kotei, a.out, a.pref)
+    counts = parse_kotei(kotei, p.name)
     print(f"{'市町':<8}{'メッシュ数':>8}{'割当棟数':>12}{'固定資産':>12}{'差':>8}")
     bad = 0
     for name, (w, n) in counts.items():
@@ -286,27 +371,58 @@ def main() -> None:
     print(f"市町数 {len(counts)} / 割当棟数合計 {sum(r.allocated.values()):.1f} / 固定資産合計 {sum(w + n for w, n in counts.values())} / 不一致 {bad}")
     print("県計割合で代用:", "、".join(r.fallback) or "なし")
     today = date.today().isoformat()
-    for ds in (
+    fallback_note = ("県計割合で代用: " + "、".join(r.fallback) + "。") if r.fallback else "県計割合での代用なし。"
+    update_manifest_pref(
+        a.manifest,
         {
             "id": "census-mesh",
-            "name": "令和2年国勢調査 4分の1地域メッシュ（世帯総数）と小地域境界（三重県）",
-            "source": "総務省統計局 令和2年国勢調査 地域メッシュ統計（T001142）・境界データ（r2ka24）",
+            "name": "令和2年国勢調査 4分の1地域メッシュ（世帯総数）と小地域境界（{prefs}）",
+            "source": "総務省統計局 令和2年国勢調査 地域メッシュ統計（T001142）・境界データ（r2ka{codes}）",
             "url": "https://www.e-stat.go.jp/gis",
             "publishedDate": "令和2年（2020）",
             "license": "政府統計の総合窓口の利用規約（出典明記で二次利用可）",
             "processedDate": today,
-            "notes": "世帯総数の按分に使用。\"*\"・空欄は 0。メッシュ中心点を含む市町に割当（境界は小地域を市町ごとに併合）。",
+            "notes": "世帯総数の按分に使用。\"*\"・空欄は 0。メッシュ中心点を含む市町に割当（境界は小地域を市町ごとに併合。政令指定都市の区は市にまとめる）。",
         },
-        {
-            "id": "housing-land-survey",
-            "name": "令和5年住宅・土地統計調査 三重県 第6-3表（構造×建築時期）",
-            "source": "総務省統計局 令和5年住宅・土地統計調査 三重県結果",
-            "url": "https://www.pref.mie.lg.jp/common/content/001214590.pdf",
-            "publishedDate": "令和5年（2023）調査",
-            "license": "政府統計の総合窓口の利用規約（出典明記で二次利用可）",
-            "processedDate": today,
-            "notes": r.notes + "県計は第6-1表（建築時期14区分）から2001年以降を合算。不詳は除外。",
-        },
+        a.pref,
+    )
+    if a.pref == "24":
+        update_manifest(
+            a.manifest,
+            {
+                "id": "housing-land-survey",
+                "name": "令和5年住宅・土地統計調査 三重県 第6-3表（構造×建築時期）",
+                "source": "総務省統計局 令和5年住宅・土地統計調査 三重県結果",
+                "url": "https://www.pref.mie.lg.jp/common/content/001214590.pdf",
+                "publishedDate": "令和5年（2023）調査",
+                "license": "政府統計の総合窓口の利用規約（出典明記で二次利用可）",
+                "processedDate": today,
+                "notes": r.notes + "県計は第6-1表（建築時期14区分）から2001年以降を合算。不詳は除外。",
+            },
+        )
+    else:
+        update_manifest_pref(
+            a.manifest,
+            {
+                "id": "housing-land-survey-estat",
+                "name": "令和5年住宅・土地統計調査 表6-3-2 住宅の構造(4区分)、建築の時期(7区分)別住宅数（{prefs}）",
+                "source": "総務省統計局 令和5年住宅・土地統計調査 住宅及び世帯に関する基本集計（e-Stat 表6-3-2）",
+                "url": "https://www.e-stat.go.jp/dbview?sid=0004021696",
+                "publishedDate": "令和5年（2023）調査",
+                "license": "政府統計の総合窓口の利用規約（出典明記で二次利用可）",
+                "processedDate": today,
+                "notes": (
+                    "メッシュ中心点を含む市町村に割り当て、固定資産の棟数（木造・木造以外）を世帯総数で按分。"
+                    "構造×年代の割合は表6-3-2（建築時期は1970以前+1971-80=pre1981、1981-90+1991-2000=1981-2000、2001-2023=post2000。"
+                    "構造は木造・鉄筋鉄骨コンクリート造・鉄骨造、その他は除外。「-」は 0）を木造/非木造の棟数比で重み付け。"
+                    "政令指定都市は市全体の値。市町村の値がなければ県計の割合で代用。"
+                ),
+            },
+            a.pref,
+            fallback_note,
+        )
+    update_manifest(
+        a.manifest,
         {
             "id": "kotei-shisan",
             "name": "固定資産の価格等の概要調書（家屋）令和6年度 総括表",
@@ -315,11 +431,9 @@ def main() -> None:
             "publishedDate": "令和6年度",
             "license": "政府機関の公表資料（出典明記）",
             "processedDate": today,
-            "notes": "表側「木造・総数」「木造以外・総数」の棟数を市町の建物棟数として使用。",
+            "notes": "表側「木造・総数」「木造以外・総数」の棟数を市町村の建物棟数として使用（政令指定都市は市全体）。",
         },
-    ):
-        update_manifest(a.manifest, ds)
-
+    )
 
 if __name__ == "__main__":
     main()

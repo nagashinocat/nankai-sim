@@ -26,10 +26,15 @@ export function nearestShelters(
     .slice(0, opts.limit);
 }
 
-/** 徒歩時間が津波到達時間の 80% 未満なら ok、100% まで tight、超えれば no。到達時間なしは n/a。 */
+/** 揺れが収まってから避難を始めるまでの時間(分)。 */
+export const EVAC_START_MIN = 5;
+
+/** 徒歩(遅め)+避難開始までの時間 t を到達時間と比べる。到達時間なし・5分以内は判定しない(n/a)。
+ *  t < 到達−5 なら ok、t <= 到達なら tight、超えれば no。 */
 export function reachBeforeTsunami(walkMin: number, arrivalMin: number | null): 'ok' | 'tight' | 'no' | 'n/a' {
-  if (arrivalMin === null) return 'n/a';
-  if (walkMin < 0.8 * arrivalMin) return 'ok';
-  if (walkMin <= arrivalMin) return 'tight';
+  if (arrivalMin === null || arrivalMin <= EVAC_START_MIN) return 'n/a';
+  const t = walkMin + EVAC_START_MIN;
+  if (t < arrivalMin - 5) return 'ok';
+  if (t <= arrivalMin) return 'tight';
   return 'no';
 }

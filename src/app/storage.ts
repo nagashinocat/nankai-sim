@@ -4,7 +4,9 @@ import type { AreaVM, EvacVM, OkHomeVM } from './viewmodel.ts';
 /** 保存する避難場所。名前と距離・徒歩の文字列だけ（座標は持たせない）。 */
 export type SavedShelterList = {
   hazard: 'earthquake' | 'tsunami';
-  items: { name: string; distance: string; walkStandard: string; walkSlow: string }[];
+  items: { name: string; distance: string; walkStandard: string; walkSlow: string; reachText: string }[];
+  /** 判定に使った到達時間の高さ（cm）。以前の保存には無い */
+  arrivalCm?: number | null;
 };
 
 /**
@@ -12,7 +14,7 @@ export type SavedShelterList = {
  * プライバシー: 住所の文字列・座標は含めない（型にも持たせない）。
  */
 export type Saved = {
-  v: 2; // スキーマ版。変えたら上げる（古い値は読み捨てる）。v2 で避難場所を追加
+  v: 3; // スキーマ版。変えたら上げる（古い値は読み捨てる）。v2 で避難場所、v3 で津波（段階の文言・判定の文言）を追加
   savedAt: string; // ISO 8601
   municipality: string | null;
   input: HomeInput;
@@ -25,7 +27,8 @@ export type Saved = {
 export function savedShelters(evac: EvacVM[]): SavedShelterList[] {
   return evac.map((e) => ({
     hazard: e.hazard,
-    items: e.items.map((i) => ({ name: i.name, distance: i.distance, walkStandard: i.walkStandard, walkSlow: i.walkSlow })),
+    items: e.items.map((i) => ({ name: i.name, distance: i.distance, walkStandard: i.walkStandard, walkSlow: i.walkSlow, reachText: i.reachText })),
+    arrivalCm: e.arrivalCm ?? null,
   }));
 }
 
@@ -46,17 +49,22 @@ const isStr = (x: unknown): x is string => typeof x === 'string';
 function validShelters(x: unknown): boolean {
   return Array.isArray(x) && x.every((l) =>
     isObj(l) && (l.hazard === 'earthquake' || l.hazard === 'tsunami') && Array.isArray(l.items) &&
-    l.items.every((i) => isObj(i) && isStr(i.name) && isStr(i.distance) && isStr(i.walkStandard) && isStr(i.walkSlow)));
+    (l.arrivalCm === undefined || l.arrivalCm === null || typeof l.arrivalCm === 'number') &&
+    l.items.every((i) => isObj(i) && isStr(i.name) && isStr(i.distance) && isStr(i.walkStandard) && isStr(i.walkSlow) && isStr(i.reachText)));
 }
 
 function validSaved(o: Record<string, unknown>): boolean {
-  if (o.v !== 2 || typeof o.savedAt !== 'string') return false;
+  if (o.v !== 3 || typeof o.savedAt !== 'string') return false;
   if (o.municipality !== null && typeof o.municipality !== 'string') return false;
   if (!isObj(o.input) || !isObj(o.home) || !isObj(o.area) || !validShelters(o.shelters)) return false;
   const h = o.home;
   if (h.status !== 'ok') return false;
   if (typeof h.intensityLabel !== 'string' || !isRange(h.collapse) || !isRange(h.half)) return false;
   if (h.liquefaction !== null && typeof h.liquefaction !== 'string') return false;
+  const t = h.tsunami;
+  if (!isObj(t)) return false;
+  if (t.kind === 'band' || t.kind === 'nearby') { if (!isStr(t.depth) || (t.arrival !== null && !isStr(t.arrival)) || typeof t.urgent !== 'boolean') return false; }
+  else if (t.kind !== 'none' && t.kind !== 'unknown') return false;
   if (!Array.isArray(h.notes) || !h.notes.every((n) => typeof n === 'string')) return false;
   const a = o.area;
   if (a.status === 'ok') return Number.isFinite(a.collapse) && Number.isFinite(a.half) && Number.isFinite(a.meshes);

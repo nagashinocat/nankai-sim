@@ -68,3 +68,16 @@ Deferred:
 - Tsunami shelters have no map pins or route link.
 - Municipality name uses plurality (not majority) at borders; nearestShelters duplicated in main.ts.
 - build:public cannot pass --base; subpath deploy runs the check manually.
+
+## 津波・東海4県（2026-11-12）— rulings and deferred items
+
+Rulings: A1 arrival keyed by municipality name. A2 published tables named <pref>_municipal.csv. A3 merge fails on name collisions (none found). T1-a tsunami tile 404 = no inundation. T1-b attribution with PDL1.0 加工 statement. T1-c zoom 17, colour distance 24. T7-a Gifu compared with Cabinet Office case 1 (L2_KIHON). T7-b Shizuoka compared at prefecture total only. T7-c/e arrival carries its height (Mie/Aichi 30 cm, Shizuoka 50 cm). T7-d per-prefecture builds in build/. T7-f reconcile-only cases not published. F2 always-on strong evacuate line when inundation is expected. F3 50 m ring sampling before saying "outside inundation". F4 coverage = 250 m cells overlapping land in the 4 prefectures.
+
+Deferred:
+- Boundary files include water-area polygons (HCODE 8154), so open bay/port cells count as covered; filter to land (HCODE 8101) if it matters. area > 0 has no tolerance.
+- Reconciliation is weak for Gifu (0.47× vs the 2012 prefecture study) and Aichi (1.23×, 25/52); Shizuoka checked at totals only (1.21×). Not surfaced in the app.
+- Tile-edge ring sampling is unit-tested only; z17/404 behaviour verified on Mie tiles only.
+- Area estimate silently drops tsunami for unreadable tiles.
+- Pipeline small items: housing parser chosen in two places; shelters duplicate-id first-wins vs merge raises; real-data Mie test has no skip marker; mid-file imports in two tests.
+- App small items: unused pixelCache; `caches` shadows global; createImageBitmap without colorSpaceConversion:'none'; no test of tsunami depth fed to the area estimate; comments still say 市町名; e2e skip guard checks only two files.
+- Wakayama next (pipeline is per-prefecture now).

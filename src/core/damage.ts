@@ -39,10 +39,12 @@ function newer(e: Era): Era {
 
 /** 家の推定。幅 = 構造 × 年代（unknown は全構造・全年代, 補強済みは 1 つ新しい年代）×
  *  震度 {−0.5, 0, +0.5} × 曲線 {'min', 'rep', 'max'} の最小〜最大（'rep' を含めるので central は必ず幅に収まる）。
+ *  tsunamiRange があれば浸水深 {lo, hi} も幅のループに加える（central は cell.tsunamiDepth のまま）。
  *  central = 'rep'（代表曲線）の補正なしの値。構造か年代が unknown のときは、該当する組合せの項目ごとの平均。 */
 export function estimateHome(
   cell: HazardCell,
   input: HomeInput,
+  tsunamiRange?: Range,
 ): { collapse: Range; half: Range; central: Rates } | null {
   if (cell.intensity === null || !Number.isFinite(cell.intensity)) return null;
   const structures = input.structure === 'unknown' ? STRUCTURES : [input.structure];
@@ -50,8 +52,11 @@ export function estimateHome(
   const eras = input.era === 'unknown' ? ERAS : [input.era];
   let cMin = Infinity, cMax = -Infinity, hMin = Infinity, hMax = -Infinity;
   let cSum = 0, hSum = 0, n = 0;
+  // 浸水深の幅（あれば）。無ければ cell.tsunamiDepth のみ（従来どおり）。
+  const depths: (number | null)[] = tsunamiRange ? [tsunamiRange[0], tsunamiRange[1], cell.tsunamiDepth] : [cell.tsunamiDepth]; // central の深さも含め、central が幅に収まるようにする
   for (const di of [-0.5, 0, 0.5]) {
-    const shifted: HazardCell = { ...cell, intensity: cell.intensity + di };
+   for (const depth of depths) {
+    const shifted: HazardCell = { ...cell, intensity: cell.intensity + di, tsunamiDepth: depth };
     for (const s of structures) {
       for (const e0 of eras) {
         const e = input.retrofitted ? newer(e0) : e0;
@@ -61,13 +66,15 @@ export function estimateHome(
           cMin = Math.min(cMin, r.collapse); cMax = Math.max(cMax, r.collapse);
           hMin = Math.min(hMin, r.half); hMax = Math.max(hMax, r.half);
         }
-        if (di === 0) {
-          const r = ratesForCell(shifted, s, e, floors, 'rep');
+        if (di === 0 && depth === depths[depths.length - 1]) {
+          // central は常に cell.tsunamiDepth（範囲の端ではない）
+          const r = ratesForCell({ ...shifted, tsunamiDepth: cell.tsunamiDepth }, s, e, floors, 'rep');
           if (!r) return null;
           cSum += r.collapse; hSum += r.half; n++;
         }
       }
     }
+   }
   }
   return { collapse: [cMin, cMax], half: [hMin, hMax], central: { collapse: cSum / n, half: hSum / n } };
 }

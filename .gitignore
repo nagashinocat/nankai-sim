@@ -3,10 +3,13 @@ node_modules/
 public/data/hazard/
 public/data/shelters/
 public/data/stock/
-reports/
+/reports/
 __pycache__/
 data/naikaku_raw/
 data/raw/
 dist/
 test-results/
 playwright-report/
+
+# 県ごとの中間出力（build/data-build/<県コード>。pipeline.merge で public/data に統合）
+build/

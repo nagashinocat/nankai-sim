@@ -2,6 +2,9 @@ import * as L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { meshCenter } from '../../core/mesh.ts';
 import type { LatLon, Shelter } from '../../core/types.ts';
+import { TSUNAMI_BANDS } from '../../core/tsunami.ts';
+import { TSUNAMI_TILE_URL } from '../tsunami-tile.ts';
+import { TSUNAMI_ATTRIBUTION, TSUNAMI_CREDIT_SHORT } from '../text.ts';
 import { el } from './dom.ts';
 
 const TILE_URL = 'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png';
@@ -53,6 +56,13 @@ export function createResultMap(
   resultMap?.remove();
   const map = baseMap(node, home, 15);
   resultMap = map;
+  // 津波浸水想定（地理院のタイル）。無い所（404）は透明のままにする。
+  // 全壊率の四角（overlayPane=400）より上に重ね、凡例の色と見た目を合わせる。
+  map.createPane('tsunami').style.zIndex = '450';
+  L.tileLayer(TSUNAMI_TILE_URL, {
+    pane: 'tsunami', opacity: 0.5, maxNativeZoom: 17, maxZoom: 18, attribution: TSUNAMI_CREDIT_SHORT,
+    errorTileUrl: 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==',
+  }).addTo(map);
   for (const { mesh, rate } of meshes) {
     const c = meshCenter(mesh);
     const dLat = 1 / 960, dLon = 1 / 640;
@@ -99,9 +109,9 @@ export function legendElement(): HTMLElement {
 
 /** 0件のとき: ピンを動かして場所を決める地図。 */
 export function createPinPicker(node: HTMLElement, onMove: (p: LatLon) => void, start?: LatLon): { map: L.Map; get(): LatLon } {
-  const center = start ?? { lat: 34.73, lon: 136.51 }; // 三重県付近から開始
+  const center = start ?? { lat: 35.0, lon: 137.3 }; // 静岡・愛知・岐阜・三重の4県の中ほどから開始
   disposePinPicker();
-  const map = baseMap(node, center, start ? 15 : 9);
+  const map = baseMap(node, center, start ? 15 : 8);
   pickerMap = map;
   const marker = L.marker([center.lat, center.lon], {
     draggable: true,
@@ -117,4 +127,20 @@ export function createPinPicker(node: HTMLElement, onMove: (p: LatLon) => void, 
     onMove(read());
   });
   return { map, get: read };
+}
+
+/** 津波浸水深の凡例（8色）。色だけに頼らず段階名を併記する。 */
+export function tsunamiLegendElement(): HTMLElement {
+  return el(
+    'ul',
+    { class: 'legend tsunami-legend', 'aria-label': '凡例（津波の浸水深の想定。地図に薄く重ねています）' },
+    ...TSUNAMI_BANDS.map((b) =>
+      el('li', {}, el('span', { class: 'swatch', style: `background:rgb(${b.rgb.join(',')})` }), `津波 ${b.label}`),
+    ),
+  );
+}
+
+/** 出典の全文は地図の上に重ねず、地図・凡例の下に出す。 */
+export function tsunamiCaption(): HTMLElement {
+  return el('p', { class: 'hint tsunami-attribution' }, TSUNAMI_ATTRIBUTION);
 }

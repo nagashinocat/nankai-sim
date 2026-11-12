@@ -49,8 +49,8 @@ test('walkMin = 直線距離 × 1.3 ÷ 速度 ÷ 60', () => {
 });
 
 for (const [walk, arr, want] of [
-  [10, 20, 'ok'], [17, 20, 'tight'], [25, 20, 'no'], [10, null, 'n/a'],
-  [16, 20, 'tight'], [20, 20, 'tight'],
+  [10, null, 'n/a'], [1, 5, 'n/a'], [1, 3, 'n/a'], [5, 30, 'ok'], [19.9, 30, 'ok'],
+  [20, 30, 'tight'], [25, 30, 'tight'], [30, 30, 'no'], [26, 30, 'no'],
 ] as const) {
   test(`reachBeforeTsunami(${walk},${arr})=${want}`, () => {
     assert.equal(reachBeforeTsunami(walk, arr), want);

@@ -196,3 +196,19 @@ test('estimateLag の既定は rep', () => {
   const a = cell({ intensity: 6 }), b = cell({ intensity: 5.5 });
   assert.deepEqual(estimateLag(a, b, 'wood', 'pre1981'), estimateLag(a, b, 'wood', 'pre1981', undefined, 'rep'));
 });
+
+test('estimateHome: tsunamiRange widens the range; central stays at cell depth', () => {
+  const input = { structure: 'wood' as const, era: 'pre1981' as const, retrofitted: false };
+  const c = cell({ intensity: 6.0, tsunamiDepth: 2 });
+  const base = estimateHome(c, input)!;
+  const ranged = estimateHome(c, input, [1, 3])!;
+  assert.ok(ranged.collapse[0] <= ranged.central.collapse + 1e-12);
+  assert.ok(ranged.central.collapse <= ranged.collapse[1] + 1e-12);
+  assert.ok(ranged.collapse[1] > estimateHome(cell({ intensity: 6.0 }), input)!.collapse[1]);
+  assert.deepEqual(ranged.central, base.central);
+  assert.ok(ranged.collapse[1] >= base.collapse[1]);
+  assert.ok(ranged.collapse[0] <= base.collapse[0]);
+  assert.ok(ranged.collapse[1] >= estimateHome(cell({ intensity: 6.0, tsunamiDepth: 3 }), input)!.collapse[1] - 1e-12);
+  assert.ok(ranged.collapse[0] <= estimateHome(cell({ intensity: 6.0, tsunamiDepth: 1 }), input)!.collapse[0] + 1e-12);
+  assert.deepEqual(estimateHome(c, input, undefined), base);
+});

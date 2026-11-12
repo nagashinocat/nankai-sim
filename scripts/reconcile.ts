@@ -20,12 +20,28 @@ export function reconcile(rows: ReconcileInput[], tolerance = 0.3): ReconcileRes
 
 type Row = ReconcileInput & ReconcileResult;
 
-/** 照合表（Markdown）。notes は manifest の各データセットの仮定。 */
-export const CABINET_PREF_TOTAL = 157000; // 内閣府 都府県別 三重県 揺れ全壊（陸側）約157,000 (bousai.go.jp/jishin/nankai/taisaku_wg_02/pdf/saidai_02.pdf)
-export const PREF_PUBLISHED_TOTAL = 152000; // 県の公表 県計 約152,000
+export const PREF_NAMES: Record<string, string> = { '21': '岐阜県', '22': '静岡県', '23': '愛知県', '24': '三重県' };
+/** 国（内閣府）の都府県別 揺れ全壊の想定値の既定。三重県 揺れ全壊（陸側）約157,000 (bousai.go.jp/jishin/nankai/taisaku_wg_02/pdf/saidai_02.pdf)。他県は --national で渡す。 */
+export const DEFAULT_NATIONAL: Record<string, number> = { '24': 157000 };
+/**
+ * 県の公表 揺れ全壊の県計（県が使ったケースのみ。ほかのケースでは比べない）。
+ * 三重 約152,000（陸側）／愛知 約222,000（理論上最大・陸側ケース）／岐阜 7,773（内閣府 基本ケース）／
+ * 静岡 L2 地震動 基本ケース 約171,000・陸側ケース 約179,000（第4次地震被害想定 第一次報告 第Ⅲ編）。
+ */
+export const PREF_PUBLISHED_TOTALS: Record<string, Record<string, number>> = {
+  '24': { L2_RIKU: 152000 },
+  '23': { L2_RIKU: 222000 },
+  '21': { L2_KIHON: 7773 },
+  '22': { L2_RIKU: 179000, L2_KIHON: 171000 },
+};
+const CABINET_URL = 'https://www.bousai.go.jp/jishin/nankai/taisaku_wg_02/pdf/saidai_02.pdf';
 
 const CSV_CASES = ['L2'];
-const HAZARD_CASES = ['L2', 'L2_RIKU', 'HALF_E', 'HALF_W'];
+const HAZARD_CASES = ['L2', 'L2_RIKU', 'HALF_E', 'HALF_W', 'L2_KIHON'];
+/** 照合だけに使うケース。pipeline.naikaku_hazard が public/ の外（build/hazard-reconcile）に出力する（Ruling T7-f）。 */
+export const RECONCILE_CASES = ['L2_RIKU', 'L2_KIHON'];
+export const PUBLIC_HAZARD_DIR = 'public/data/hazard';
+export const RECONCILE_HAZARD_DIR = 'build/hazard-reconcile';
 
 /** CSV のケース名（L2=県の L2 公表値）を、使うハザードのディレクトリ名に対応づける。未知は例外。 */
 export function resolveHazardCase(csvCase: string, hazardCase: string): string {
@@ -34,20 +50,91 @@ export function resolveHazardCase(csvCase: string, hazardCase: string): string {
   return hazardCase;
 }
 
-export type PrefTotal = { computed: number; ratioCabinet: number; ratioPref: number };
-export function prefectureTotal(rows: { computed: number }[]): PrefTotal {
+export type PrefTotal = { computed: number; national: number; ratioCabinet: number; prefPublished: number | null; ratioPref: number | null };
+/** 県計: 計算値の合計と、国の想定値（national）・県の公表値（prefPublished、無ければ null）との比。 */
+export function prefectureTotal(rows: { computed: number }[], national: number, prefPublished: number | null): PrefTotal {
   const computed = rows.reduce((a, r) => a + r.computed, 0);
-  return { computed, ratioCabinet: computed / CABINET_PREF_TOTAL, ratioPref: computed / PREF_PUBLISHED_TOTAL };
+  return {
+    computed,
+    national,
+    ratioCabinet: computed / national,
+    prefPublished,
+    ratioPref: prefPublished ? computed / prefPublished : null,
+  };
 }
 
-export type ReportOptions = { hazardCase?: string; skipped?: number; prefecture?: PrefTotal };
+export type ReportOptions = { hazardCase?: string; skipped?: number; prefecture?: PrefTotal; prefName?: string; nationalLabel?: string };
 
+export type Args = {
+  pref: string; prefName: string; national: number; nationalLabel: string; prefPublished: number | null; hazardCase: string;
+  /** 公表値 CSV（--totals-only のときは null） */
+  csv: string | null;
+  /** --totals-only のとき市町村一覧を読む県ごとの建物出力（それ以外は null） */
+  munisFrom: string | null;
+  /** ハザードのディレクトリ（リポジトリのルートから。その下に <ケース>/<2次メッシュ>.json） */
+  hazardDir: string;
+  report: string;
+};
+
+const CABINET_LABEL = `内閣府 （陸側, ${CABINET_URL}）`;
+
+/**
+ * コマンドライン引数: --pref <県コード>（既定 24）、--national <棟数>（24 以外は必須）、--hazard-case（既定 L2_RIKU）、
+ * --totals-only（市町村別の公表値が無い県。build/data-build/<県>/stock/municipality_meshes.json の全市町村で県計だけ比べる）。
+ */
+export function parseArgs(argv: string[]): Args {
+  const opt = (name: string): string | undefined => {
+    const i = argv.indexOf(name);
+    if (i < 0) return undefined;
+    const v = argv[i + 1];
+    if (v === undefined || v.startsWith('--')) throw new Error(`${name} に値がありません`);
+    return v;
+  };
+  const pref = opt('--pref') ?? '24';
+  const prefName = PREF_NAMES[pref];
+  if (!prefName) throw new Error(`未対応の県コード: ${pref}（${Object.keys(PREF_NAMES).join(', ')}）`);
+  const hazardCase = opt('--hazard-case') ?? 'L2_RIKU';
+  if (!HAZARD_CASES.includes(hazardCase)) throw new Error(`未知のハザードケース: ${hazardCase}`);
+  const nat = opt('--national');
+  const national = nat === undefined ? DEFAULT_NATIONAL[pref] : Number(nat);
+  const totalsOnly = argv.includes('--totals-only');
+  const csvPath = `data/published/${pref}_municipal.csv`;
+  if (totalsOnly && existsSync(resolve(root, csvPath))) throw new Error(`--totals-only は市町村別の公表表が無い県だけ（${csvPath} があります）`);
+  if (national === undefined) throw new Error(`--national <棟数>（国の想定する ${prefName} の揺れ全壊棟数）を指定してください`);
+  if (!Number.isFinite(national) || national <= 0) throw new Error(`--national は正の数: ${nat}`);
+  return {
+    pref,
+    prefName,
+    national,
+    nationalLabel: nat === undefined ? CABINET_LABEL : '比較値（--national で指定）',
+    prefPublished: PREF_PUBLISHED_TOTALS[pref]?.[hazardCase] ?? null,
+    hazardCase,
+    csv: totalsOnly ? null : csvPath,
+    munisFrom: totalsOnly ? `build/data-build/${pref}/stock/municipality_meshes.json` : null,
+    hazardDir: opt('--hazard-dir') ?? (RECONCILE_CASES.includes(hazardCase) ? RECONCILE_HAZARD_DIR : PUBLIC_HAZARD_DIR),
+    report: `reports/reconcile-${pref}-${hazardCase}.md`,
+  };
+}
+
+/** 「内閣府 約157,000（陸側, URL）」の形。ラベルの「（」の前に値を入れる。 */
+function nationalText(label: string, n: number): string {
+  const v = `約${n.toLocaleString('en-US')}`;
+  const i = label.indexOf('（');
+  return i < 0 ? `${label} ${v}` : `${label.slice(0, i).trimEnd()} ${v}${label.slice(i)}`;
+}
+
+/** 公表値の無い市町村の照合行（--totals-only）。computed は市町村名 → 計算値。 */
+export function inputsFromNames(names: string[], hazardCase: string, computed: (name: string) => number): ReconcileInput[] {
+  return names.map((municipality) => ({ municipality, case: hazardCase, published: null, computed: computed(municipality) }));
+}
+
+/** 照合表（Markdown）。notes は manifest の各データセットの仮定。 */
 export function buildReport(results: (ReconcileResult & Partial<ReconcileInput>)[], datasets: { id: string; notes?: string }[], opts: ReportOptions = {}): string {
   const judged = results.filter((r) => r.pass !== null);
   const passed = judged.filter((r) => r.pass).length;
   const fmt = (n: number | null | undefined) => (n == null ? '-' : Math.round(n).toLocaleString('en-US'));
   const lines = [
-    `# 三重県 L2 揺れ全壊棟数の照合（ハザード: ${opts.hazardCase ?? '-'}）`,
+    `# ${opts.prefName ?? '三重県'} L2 揺れ全壊棟数の照合（ハザード: ${opts.hazardCase ?? '-'}）`,
     '',
     `合格（±30%）: ${passed}/${judged.length}`,
     '',
@@ -57,7 +144,10 @@ export function buildReport(results: (ReconcileResult & Partial<ReconcileInput>)
     ...(opts.prefecture
       ? [
           '',
-          `県計: 計算 ${opts.prefecture.computed.toLocaleString('en-US').split('.')[0]} / 内閣府 約${CABINET_PREF_TOTAL.toLocaleString('en-US')}（陸側, https://www.bousai.go.jp/jishin/nankai/taisaku_wg_02/pdf/saidai_02.pdf）= ${opts.prefecture.ratioCabinet.toFixed(2)} / 県 約${PREF_PUBLISHED_TOTAL.toLocaleString('en-US')} = ${opts.prefecture.ratioPref.toFixed(2)}`,
+          `県計: 計算 ${opts.prefecture.computed.toLocaleString('en-US').split('.')[0]} / ${nationalText(opts.nationalLabel ?? CABINET_LABEL, opts.prefecture.national)} = ${opts.prefecture.ratioCabinet.toFixed(2)}` +
+            (opts.prefecture.prefPublished !== null && opts.prefecture.ratioPref !== null
+              ? ` / 県 約${opts.prefecture.prefPublished.toLocaleString('en-US')} = ${opts.prefecture.ratioPref.toFixed(2)}`
+              : ''),
         ]
       : []),
     ...(opts.skipped !== undefined ? ['', `ハザードまたは建物が無くスキップしたメッシュ数: ${opts.skipped}`] : []),
@@ -76,18 +166,19 @@ function readJson(p: string): any { return JSON.parse(readFileSync(resolve(root,
 
 export type JsonReader = (relPath: string) => unknown;
 
-/** 市町のメッシュ群の揺れ全壊棟数 Σ total×share×collapse(Ia)。reader は public/ 配下の相対パスから JSON を読む（テストで差し替え可）。 */
-export function computeMunicipality(hazardCase: string, meshes: string[], hazardCache: Map<string, Record<string, number[]>>, stockCache: Map<string, Record<string, { total: number; shares: Record<string, number> }>>, reader: JsonReader = readJson): { sum: number; skipped: number } {
+/** 市町のメッシュ群の揺れ全壊棟数 Σ total×share×collapse(Ia)。reader はリポジトリのルートからの相対パスで JSON を読む（ハザードは hazardDir の下）（テストで差し替え可）。 */
+export function computeMunicipality(hazardCase: string, meshes: string[], hazardCache: Map<string, Record<string, (number | null)[]>>, stockCache: Map<string, Record<string, { total: number; shares: Record<string, number> }>>, reader: JsonReader = readJson, hazardDir: string = PUBLIC_HAZARD_DIR): { sum: number; skipped: number } {
   let sum = 0;
   let skipped = 0;
   for (const mesh of meshes) {
     const m2 = mesh.slice(0, 6);
-    if (!hazardCache.has(m2)) hazardCache.set(m2, reader(`public/data/hazard/${hazardCase}/${m2}.json`) as Record<string, number[]>);
+    if (!hazardCache.has(m2)) hazardCache.set(m2, reader(`${hazardDir}/${hazardCase}/${m2}.json`) as Record<string, (number | null)[]>);
     if (!stockCache.has(m2)) stockCache.set(m2, reader(`public/data/stock/${m2}.json`) as Record<string, { total: number; shares: Record<string, number> }>);
     const hz = hazardCache.get(m2)![mesh];
     const st = stockCache.get(m2)![mesh];
-    if (!hz || !st) { skipped++; continue; }
-    const ia = hz[0]!;
+    // 想定値の無いメッシュ（全項目 null の行。Ruling F1）もスキップ
+    if (!hz || typeof hz[0] !== 'number' || !st) { skipped++; continue; }
+    const ia = hz[0];
     for (const [key, share] of Object.entries(st.shares)) {
       const [s, e] = key.split(':') as [Structure, Era];
       sum += st.total * share * shakeRates(ia, s, e, undefined, 'rep').collapse;
@@ -97,31 +188,46 @@ export function computeMunicipality(hazardCase: string, meshes: string[], hazard
 }
 
 function main(): void {
-  const i = process.argv.indexOf('--hazard-case');
-  const hazardCase = i >= 0 ? process.argv[i + 1] : 'L2_RIKU';
-  if (!hazardCase) throw new Error('--hazard-case に値がありません');
+  const args = parseArgs(process.argv.slice(2));
+  const { hazardCase } = args;
   useFragilityTable(fragility as unknown as FragilityTable);
-  const csv = readFileSync(resolve(root, 'data/published/mie_municipal.csv'), 'utf8').trim().split('\n').slice(1);
   const meshes: Record<string, string[]> = readJson('public/data/stock/municipality_meshes.json');
-  const hz = new Map<string, Record<string, number[]>>();
+  const hz = new Map<string, Record<string, (number | null)[]>>();
   const st = new Map<string, Record<string, { total: number; shares: Record<string, number> }>>();
   let skipped = 0;
-  const inputs: ReconcileInput[] = csv.map((line: string) => {
-    const [municipality, c, v] = line.split(',') as [string, string, string];
-    resolveHazardCase(c, hazardCase);
+  const compute = (municipality: string): number => {
     const ms = meshes[municipality];
     if (!ms) throw new Error(`municipality_meshes.json に ${municipality} がありません`);
-    const published = v.trim() === '-' || v.trim() === '' ? null : Number(v);
-    const r = computeMunicipality(hazardCase, ms, hz, st);
+    const r = computeMunicipality(hazardCase, ms, hz, st, readJson, args.hazardDir);
     skipped += r.skipped;
-    return { municipality, case: c, published, computed: r.sum };
-  });
+    return r.sum;
+  };
+  let inputs: ReconcileInput[];
+  if (args.csv === null) {
+    // 市町村別の公表値が無い県: 県の建物出力にある全市町村で県計だけ比べる
+    const names = Object.keys(readJson(args.munisFrom!) as Record<string, string[]>);
+    inputs = inputsFromNames(names, hazardCase, compute);
+  } else {
+    const csv = readFileSync(resolve(root, args.csv), 'utf8').trim().split('\n').slice(1);
+    inputs = csv.map((line: string) => {
+      const [municipality, c, v] = line.split(',') as [string, string, string];
+      resolveHazardCase(c, hazardCase);
+      const published = v.trim() === '-' || v.trim() === '' ? null : Number(v);
+      return { municipality, case: c, published, computed: compute(municipality) };
+    });
+  }
   const results = reconcile(inputs);
   const rows = results.map((r, i) => ({ ...inputs[i]!, ...r }) as Row);
   const manifest = readJson('public/data/manifest.json') as { datasets: { id: string; notes?: string }[] };
-  const md = buildReport(rows, manifest.datasets, { hazardCase, skipped, prefecture: prefectureTotal(rows) });
+  const md = buildReport(rows, manifest.datasets, {
+    hazardCase,
+    skipped,
+    prefName: args.prefName,
+    nationalLabel: args.nationalLabel,
+    prefecture: prefectureTotal(rows, args.national, args.prefPublished),
+  });
   mkdirSync(resolve(root, 'reports'), { recursive: true });
-  const out = resolve(root, `reports/reconcile-mie-${hazardCase}.md`);
+  const out = resolve(root, args.report);
   writeFileSync(out, md);
   console.log(md.split('## 前提')[0]);
   if (!existsSync(out)) throw new Error('レポートを書けませんでした');

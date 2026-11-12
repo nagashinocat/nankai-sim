@@ -36,3 +36,80 @@ def test_flags_split_and_drop(tmp_path, capsys):
     # 菰野町の2点は同じ2次メッシュのファイル
     same = [f for f in out.glob("*.json") if len(json.loads(f.read_text(encoding="utf-8"))) == 2]
     assert len(same) == 1
+
+
+# --- 複数 CSV・zip・重複 id ---
+import zipfile
+
+import pytest
+
+from pipeline.shelters import parse_args, prefs_of
+
+
+def write_named(tmp_path, name, rows):
+    p = tmp_path / name
+    p.write_bytes(("﻿" + "\r\n".join([HEADER] + rows) + "\r\n").encode("utf-8"))
+    return p
+
+
+def load(out):
+    return {s["id"]: s for f in out.glob("??????.json") for s in json.loads(f.read_text(encoding="utf-8"))}
+
+
+def test_several_csvs_and_duplicate_id_collapsed(tmp_path):
+    a = write_named(tmp_path, "x_24000_2.csv", [
+        "1,B1,県境の公園,三重県木曽岬町1,,,,1,1,,,,0,35.0500,136.7800,",
+        "2,B2,役場,三重県木曽岬町2,,,,1,,,,,0,35.0510,136.7810,",
+    ])
+    b = write_named(tmp_path, "x_23000_2.csv", [
+        "1,B1,県境の公園,三重県木曽岬町1,,,,1,1,,,,0,35.0500,136.7800,",  # 同じ id → 1件
+        "2,C1,高台,愛知県弥富市1,,,,,1,,,,0,35.0700,136.7300,",
+    ])
+    out = tmp_path / "out"
+    n = build_shelters([a, b], out)
+    assert n == 3
+    got = load(out)
+    assert set(got) == {"B1", "B2", "C1"}
+    assert sum(len(json.loads(f.read_text(encoding="utf-8"))) for f in out.glob("??????.json")) == 3
+
+
+def test_single_path_still_accepted(tmp_path):
+    a = write_named(tmp_path, "s.csv", ["1,A1,役場,x,,,,1,,,,,0,35.02,136.5072,"])
+    assert build_shelters(a, tmp_path / "out") == 1
+
+
+def test_zip_containing_csv(tmp_path):
+    inner = write_named(tmp_path, "23000_2.csv", ["1,Z1,公園,x,,,,1,1,,,,0,35.1,136.9,"])
+    z = tmp_path / "23000_2.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.write(inner, "23000_2.csv")
+    inner.unlink()
+    out = tmp_path / "out"
+    assert build_shelters([z], out) == 1
+    assert load(out)["Z1"]["tsunami"] is True
+
+
+def test_zip_without_csv_raises(tmp_path):
+    z = tmp_path / "e.zip"
+    with zipfile.ZipFile(z, "w") as zf:
+        zf.writestr("readme.txt", "x")
+    with pytest.raises(ValueError):
+        build_shelters([z], tmp_path / "out")
+
+
+def test_prefs_of_paths(tmp_path):
+    assert prefs_of([Path("data/raw/shelters/gsi_hinanbasho_24000_2.csv"), Path("23000_2.zip")]) == ["23", "24"]
+    with pytest.raises(ValueError):
+        prefs_of([Path("unknown.csv")])
+
+
+def test_cli_several_csv_and_default_mie():
+    a = parse_args([])
+    assert a.csv == [Path("data/raw/shelters/gsi_hinanbasho_24000_2.csv")]
+    assert a.out == Path("build/data-build/24/shelters")
+    assert parse_args(["--csv", "22000_2.zip"]).out == Path("build/data-build/22/shelters")
+    b = parse_args(["--csv", "a_21000_2.csv", "22000_2.zip", "--out", "o"])
+    assert b.csv == [Path("a_21000_2.csv"), Path("22000_2.zip")]
+    assert b.out == Path("o")
+    with pytest.raises(SystemExit):  # 複数の県をまとめて出すなら --out を指定
+        parse_args(["--csv", "a_21000_2.csv", "22000_2.zip"])

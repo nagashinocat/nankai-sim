@@ -9,7 +9,26 @@
    - `dist/data/hazard/` が無い、または `dist/data/hazard/L2/index.json`（対応範囲の2次メッシュ一覧）が無い・空。想定データの無い公開物は、三重県の住所にも「この地域はまだ対応していません」としか出せないため、想定データ抜きの公開はできない。
    - `dist/data/hazard/`（内閣府データから計算し直した値）が含まれていて、`ALLOW_HAZARD_PUBLISH=1` が無い。`ALLOW_HAZARD_PUBLISH=1` を付けるのは、下の「内閣府への確認」が回答済みで、「確認結果の記録」に書き込んだ後だけにする。
    つまり、内閣府への確認が済むまでは公開用ビルドは通らない。
-3. `public/data` 配下（hazard / stock / shelters）はローカルのパイプラインで生成する（git には入っていない）。公開物にはこのデータを含める必要があるので、ビルドの前にパイプラインで生成しておく。想定データは `python3 -m pipeline.naikaku_hazard` で、各ケースのフォルダに `index.json`（対応範囲）も書き出される。アプリは `index.json` に無い2次メッシュを「この地域はまだ対応していません」と表示し、`index.json` にあるのにファイルが読めないときは読み込み失敗（再試行ボタン）として扱う。
+3. `public/data` 配下（hazard / stock / shelters）はローカルのパイプラインで生成する（git には入っていない）。公開物にはこのデータを含める必要があるので、ビルドの前にパイプラインで生成しておく。手順（リポジトリのルートで実行）:
+   ```sh
+   # 建物・避難場所は県ごとに作る（出力 build/data-build/<県コード>/。public/ の外で git 対象外）
+   for p in 21 22 23 24; do python3 -m pipeline.building_stock --pref $p; done
+   for p in 21 22 23 24; do python3 -m pipeline.shelters --csv data/raw/shelters/gsi_hinanbasho_${p}000_2.csv; done
+   # 4県分を public/data/{stock,shelters} に統合（同じメッシュの値が違えば失敗。県境のメッシュは境界の規則で決め、件数を表示）
+   python3 -m pipeline.merge --src build/data-build/21 build/data-build/22 build/data-build/23 build/data-build/24 --dst public/data
+   # 想定データ（対応範囲は 250m メッシュ単位: 四角が4県の境界 data/raw/boundary/r2ka21〜24 の和と面積>0で重なる（Ruling F4）。
+   #   統合後の建物のメッシュがすべて範囲内かも確かめるので、先に上の統合を済ませる）
+   #   公開: L2・HALF_E・HALF_W → public/data/hazard
+   #   照合用: L2_RIKU・L2_KIHON → build/hazard-reconcile（公開しない）
+   python3 -m pipeline.naikaku_hazard
+   # 津波到達時間（市町村名は統合後の municipality_meshes.json で確認）
+   python3 -m pipeline.tsunami_arrival --csv data/published/shizuoka_tsunami_arrival.csv data/published/aichi_tsunami_arrival.csv data/published/mie_tsunami_arrival.csv
+   ```
+   各コマンドは `public/data/manifest.json` の該当エントリを書き直す。`build/` は `public/` の外なので公開物には入らない。統合の後も、照合（`scripts/reconcile.ts`）には次の2つが要る（消すと照合できない）:
+   - `build/hazard-reconcile/`（L2_RIKU・L2_KIHON のハザード。県の公表値と比べるケース）
+   - `build/data-build/22/stock/municipality_meshes.json`（静岡県の `--totals-only` が市町村の一覧に使う）
+   それ以外の `build/data-build/` は統合の後に消してよい（作り直すときは上の手順をもう一度実行する）。
+   想定データの2次メッシュのファイルには対応範囲の 250m メッシュの行だけが入り（範囲内で想定値の無いメッシュは全項目 null の行）、各ケースのフォルダに `index.json`（ファイルのある2次メッシュの一覧）も書き出される。アプリは `index.json` に無い2次メッシュと、ファイルに行の無いメッシュ（同じ2次メッシュの隣県の場所）を「この地域はまだ対応していません」、null の行を「この場所のデータなし」と表示し、`index.json` にあるのにファイルが読めないときは読み込み失敗（再試行ボタン）として扱う。
 4. 静的ホストの設定:
    - SPA フォールバックを切る。存在しないファイルは `index.html`（200）ではなく 404 を返すこと（想定データが HTML で返ると、アプリは読み込み失敗として扱い結果を出せない）。
    - サブパスで公開する場合（例: GitHub Pages の `/<repo>/`）は `vite build --base=/<repo>/` でビルドする。このとき公開チェックも同じ `dist/` に対して実行すること（`npx tsx scripts/check_publish.ts dist`）。
