@@ -22,6 +22,7 @@ import { isUrgentTsunami, type PracticeHome } from './practice/scenes.ts';
 import { KIDS_TEXT, loadKids, saveKids } from './kids.ts';
 import { modeToggle, renderFamilyKids } from './ui/kids.ts';
 import type { ResultHandle } from './ui/result.ts';
+import { HAZARD_ATTRIBUTION } from './text.ts';
 
 useFragilityTable(fragility as never);
 
@@ -70,6 +71,7 @@ app.append(
   el('header', {}, el('div', { class: 'header-top' }, titleNode, toggle.node), headerNote),
   mainView, aboutRoot, practiceRoot, familyRoot,
   el('footer', {},
+    el('p', { class: 'hint', id: 'hazard-attribution' }, HAZARD_ATTRIBUTION),
     el('p', {}, el('a', { href: '#about' }, 'このアプリについて（計算方法・出典・プライバシー）')),
     el('p', {}, el('a', { href: '#family', id: 'family-footer-link' }, FAMILY_ENTRY))),
 );

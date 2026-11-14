@@ -68,7 +68,7 @@ test('複数候補は選択リストを出し、先頭を勝手に使わない',
   await page.getByLabel('住所').fill('吉澤');
   await page.getByRole('button', { name: '調べる' }).click();
   await expect(page.getByText('候補が複数見つかりました')).toBeVisible();
-  await expect(page.getByText('震度')).toHaveCount(0);
+  await expect(page.locator('#result').getByText('震度')).toHaveCount(0);
   await page.getByRole('button', { name: '候補B' }).click();
   await expect(page.getByText(/震度\d/).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('#location-note')).toHaveText('候補B 付近で計算しました');
@@ -764,4 +764,10 @@ test('練習モード: 津波なし・到達が遅い結果では揺れへの備
   await page.locator('#practice-entry').click();
   for (let i = 0; i < 6; i++) { await page.getByRole('button', { name: BEST[i] }).click(); await page.getByRole('button', { name: '次へ' }).click(); }
   await expect(page.getByText('揺れへの備え（家具の固定・耐震）を確かめておきましょう')).toBeVisible();
+});
+
+test('内閣府データの出典（加工した値である旨）が表示される', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#hazard-attribution')).toContainText('内閣府 南海トラフの巨大地震モデル・被害想定手法検討会');
+  await expect(page.locator('#hazard-attribution')).toContainText('加工して作成');
 });

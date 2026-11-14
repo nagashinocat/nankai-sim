@@ -1,3 +1,4 @@
+import { HAZARD_ATTRIBUTION } from '../text.ts';
 /**
  * こどもモードの画面（結果・かぞくの きまり）。計算はせず、画面に出している値（ScenarioHome・TsunamiVM・家族のメモ）から描く。
  * 絵文字は使わず、インライン SVG。絵には読み上げの名前か、見える文字を付ける。
@@ -241,6 +242,7 @@ export function kidsResultNodes(a: KidsResultArgs): Node[] {
     ...(a.player ? [a.player] : []),
     el('a', { href: '#family', class: 'kid-btn kid-btn-outline', id: 'kid-family' }, KIDS_TEXT.family),
     el('p', { class: 'kid-closing', id: 'kid-closing' }, KIDS_TEXT.closing[0], el('br', {}), KIDS_TEXT.closing[1]),
+    el('p', { class: 'hint kid-attribution' }, HAZARD_ATTRIBUTION),
     mapLink,
   ];
 }

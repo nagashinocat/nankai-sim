@@ -32,6 +32,8 @@ export const TSUNAMI_INUNDATED_STRONG = '浸水が想定される場所です。
 /** 中心は浸水域外だが約50m以内に浸水がある（Ruling F3）。depth は段階の表記（例「1〜3m」）。 */
 export const tsunamiNearbyText = (depth: string) => `すぐ近く（約50m以内）まで浸水が想定されています（最大 ${depth}）`;
 export const TSUNAMI_ARRIVAL_NOTE = '到達時間は海岸に津波が着く最短の時間です。自宅にはそれより後に着きますが、早めの避難の目安にしてください';
+/** 内閣府データの出典（2026-11-12 内閣府回答「出典を明記すれば使用可」）。加工した値であることも示す。 */
+export const HAZARD_ATTRIBUTION = '震度・液状化の出典：内閣府 南海トラフの巨大地震モデル・被害想定手法検討会。本アプリが被害の目安に計算し直した値です（加工して作成。内閣府の元データではありません）';
 export const TSUNAMI_ATTRIBUTION = '出典：ハザードマップポータルサイト（津波浸水想定：各都道府県）。浸水深の段階はタイルの色から本アプリが判定（加工して作成）。最新・詳細はお住まいの市町村のハザードマップをご確認ください';
 /** 地図右下の短い表示（全文は地図の下に出す）。 */
 export const TSUNAMI_CREDIT_SHORT = 'ハザードマップポータルサイト';
