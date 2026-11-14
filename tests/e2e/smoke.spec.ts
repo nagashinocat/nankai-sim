@@ -637,13 +637,14 @@ test('タブ: タブを切り替えて戻しても、自宅の印が全壊率の
   await expect(page.locator('#case-line')).toContainText('最大クラス');
   const z = await page.evaluate(() => {
     const pane = (c: string) => Number(getComputedStyle(document.querySelector(`#result-map .leaflet-${c}-pane`)!).zIndex);
-    return { mesh: pane('mesh'), overlay: pane('overlay') };
+    return { mesh: pane('mesh'), home: pane('home'), shelters: pane('shelters') };
   });
-  expect(z.mesh).toBeLessThan(z.overlay);
-  // 自宅の印の中心にある要素は、自宅の印（overlay ペインの円）
+  expect(z.mesh).toBeLessThan(z.home);
+  expect(z.shelters).toBeLessThan(z.home);
+  // 自宅の印の中心にある要素は、自宅の印（home ペインの円。避難場所の印より上）
   await page.locator('#result-map').scrollIntoViewIfNeeded();
   const hit = await page.evaluate(() => {
-    const marker = [...document.querySelectorAll('#result-map .leaflet-overlay-pane path')].find((p) => p.getAttribute('fill') === '#1F2A44' && p.getAttribute('fill-opacity') === '1')!;
+    const marker = [...document.querySelectorAll('#result-map .leaflet-home-pane path.rm-home-dot')][0]!;
     const r = marker.getBoundingClientRect();
     const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return top === marker ? 'ok' : `${top?.tagName}.${top?.getAttribute('class')} fill=${top?.getAttribute('fill')}`;

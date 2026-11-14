@@ -26,6 +26,14 @@ const noOverflow = async (page: Page) => {
   expect(w).toBeLessThanOrEqual(390);
 };
 
+/** 矢印のラベルが出るまで拡大する（最大4回） */
+async function zoomUntilPill(map: import('@playwright/test').Locator): Promise<void> {
+  for (let i = 0; i < 4 && (await map.locator('.rm-escape-label').count()) === 0; i++) {
+    await map.getByRole('button', { name: 'Zoom in' }).click();
+    await map.page().waitForTimeout(400);
+  }
+}
+
 test.beforeEach(async ({ page }) => {
   // 地図の下地（地理院タイル）は読めない（電波なしと同じ）。マス・印・矢印・凡例は手元で描く
   await page.route('**/cyberjapandata.gsi.go.jp/**', (r) => r.abort());
@@ -96,6 +104,8 @@ test('やることマップ: 津波の避難場所の大きな印と名前のラ
   // 矢印（線と矢じり）と「逃げる方向」
   await expect(map.locator('path.rm-arrow')).toHaveCount(1);
   await expect(map.locator('path.rm-arrow-head')).toHaveCount(1);
+  // 矢印が画面で短い（70px 未満）あいだはラベルを出さない。拡大すると出る
+  await zoomUntilPill(map);
   await expect(map.locator('.rm-escape-label')).toHaveText('近い津波の避難場所');
   await expect(page.locator('#risk-escape-text')).toHaveText(ESCAPE_RE);
   // 番号の「1」の津波の避難場所は、避難場所リストの先頭と同じ名前（ラベル）
@@ -105,9 +115,11 @@ test('やることマップ: 津波の避難場所の大きな印と名前のラ
   // 避難場所のペインが、マス・津波タイル・自宅の印・矢印より上
   const z = await page.evaluate(() => {
     const pane = (c: string) => Number(getComputedStyle(document.querySelector(`#result-map .leaflet-${c}-pane`)!).zIndex);
-    return { mesh: pane('mesh'), tsunami: pane('tsunami'), overlay: pane('overlay'), escape: pane('escape'), marker: pane('marker'), shelters: pane('shelters') };
+    return { mesh: pane('mesh'), tsunami: pane('tsunami'), overlay: pane('overlay'), escape: pane('escape'), marker: pane('marker'), shelters: pane('shelters'), home: pane('home') };
   });
   expect(z.shelters).toBeGreaterThan(Math.max(z.mesh, z.tsunami, z.overlay, z.escape, z.marker));
+  // 自宅の印はさらに上（いつも見える）
+  expect(z.home).toBeGreaterThan(z.shelters);
   // 説明（ツールチップ）は印より上
   expect(await page.locator('#result-map .leaflet-tooltip-pane').evaluate((e) => Number(getComputedStyle(e).zIndex))).toBeGreaterThan(z.shelters);
   // 印の真ん中にあるのは印そのもの（どのズームでも同じ大きさ）
@@ -128,14 +140,16 @@ test('やることマップ: 津波の避難場所の大きな印と名前のラ
   await map.scrollIntoViewIfNeeded();
   const before = await hit();
   expect(before.out.length).toBeGreaterThan(0);
-  expect(before.out.filter((x) => x !== 'ok' && !x.includes('rm-shelter'))).toEqual([]);
+  expect(before.out.filter((x) => x !== 'ok' && !x.includes('rm-shelter') && !x.includes('rm-home-dot'))).toEqual([]);
   await map.getByRole('button', { name: 'Zoom out' }).click();
   await page.waitForTimeout(400);
   const after = await hit();
-  expect(after.size.every((s) => s === before.size[0])).toBe(true);
+  // 印の大きさはズームで決まる（≤15: 28px、16: 34px、≥17: 40px）。縮小しても大きくはならない
+  for (const v of [...before.size, ...after.size]) expect([28, 34, 40]).toContain(v);
+  expect(Math.max(...after.size)).toBeLessThanOrEqual(Math.max(...before.size));
   // 自宅の印も見えている（避難場所の印・矢印に隠れない）
   const home = await page.evaluate(() => {
-    const marker = [...document.querySelectorAll('#result-map .leaflet-overlay-pane path')].find((p) => p.getAttribute('fill') === '#1F2A44')!;
+    const marker = [...document.querySelectorAll('#result-map .leaflet-home-pane path.rm-home-dot')][0]!;
     const r = marker.getBoundingClientRect();
     const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return top === marker ? 'ok' : `${top?.tagName}.${top?.getAttribute('class')}`;
@@ -220,6 +234,7 @@ test('やることマップ（こども）: 両方の地図・おうち・にげ
   await expect(map.locator('.rm-shelter-tsunami').first()).toBeVisible();
   await expect(map.locator('.rm-shelter-quake')).toHaveCount(0);
   await expect(map.locator('path.rm-arrow')).toHaveCount(1);
+  await zoomUntilPill(map);
   await expect(map.locator('.rm-escape-label')).toHaveText('にげる ばしょ');
   // 切りかえは無い（両方だけ）。地理院の津波タイルは重ねない
   await expect(k.locator('.rm-modes')).toHaveCount(0);
@@ -264,4 +279,56 @@ test('やることマップ: 390×844 の撮影（おとな 両方・揺れ・�
   await page.mouse.move(0, 0);
   await page.waitForTimeout(300);
   await page.screenshot({ path: 'reports/riskmap-kids-390x844.png' });
+});
+
+// 尾鷲市中村町のように、自宅のすぐ近く（約140m）に津波の避難場所がいくつも集まっている場所（避難場所のデータは差し替え）
+const OWASE = { lat: 34.0711, lon: 136.1905 };
+const at = (dn: number, de: number) => ({ lat: OWASE.lat + dn / 111_320, lon: OWASE.lon + de / (111_320 * Math.cos((OWASE.lat * Math.PI) / 180)) });
+const CROWD = [
+  { id: 'T1', name: '中村山公園', pos: at(100, -100), earthquake: true, tsunami: true },
+  { id: 'T2', name: '高台の神社', pos: at(170, -60), earthquake: false, tsunami: true },
+  { id: 'T3', name: '北の避難ビル', pos: at(200, 40), earthquake: false, tsunami: true },
+  { id: 'T4', name: '西の高台', pos: at(60, -190), earthquake: false, tsunami: true },
+  { id: 'T5', name: '東の避難タワー', pos: at(-40, 230), earthquake: true, tsunami: true },
+  { id: 'E1', name: '小学校', pos: at(-120, -60), earthquake: true, tsunami: false },
+  { id: 'E2', name: '公民館', pos: at(-200, 120), earthquake: true, tsunami: false },
+];
+
+test('やることマップ: 避難場所が自宅のまわりに集まっていても、最初の縮尺で自宅の印がいちばん上・ラベルどうしが重ならない', async ({ page }) => {
+  test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
+  await stubTsunami(page, { rgb: [255, 216, 192] });
+  await page.route('**/data/shelters/*.json', (r) => r.fulfill({ json: r.request().url().endsWith('/513601.json') ? CROWD : [] }));
+  await search(page, OWASE, '三重県尾鷲市中村町');
+  const map = page.locator('#result-map');
+  await expect(map.locator('.rm-shelter-tsunami')).toHaveCount(5);
+  await expect(page.locator('#risk-escape-text')).toHaveText(/^近い津波の避難場所「1」：北西に約140m/);
+  await map.scrollIntoViewIfNeeded();
+  await page.mouse.move(0, 0);
+  // 自宅の印の中心にあるのは自宅の印
+  const homeTop = await page.evaluate(() => {
+    const dot = document.querySelector('#result-map .leaflet-home-pane path.rm-home-dot')!;
+    const r = dot.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return top === dot ? 'ok' : `${top?.tagName}.${top?.getAttribute('class')}`;
+  });
+  expect(homeTop).toBe('ok');
+  // 矢印は短くても描く。逃げる先の印は目立たせる
+  await expect(map.locator('path.rm-arrow')).toHaveCount(1);
+  await expect(map.locator('path.rm-arrow-head')).toHaveCount(1);
+  await expect(map.locator('.rm-shelter-tsunami.rm-target')).toHaveCount(1);
+  // 見えているラベル（避難場所の名前・自宅・矢印）どうしは重ならない。名前のラベルはほかの印にも重ならない
+  const boxes = await page.evaluate(() => {
+    const vis = (sel: string) => [...document.querySelectorAll<HTMLElement>(sel)].filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.getBoundingClientRect());
+    const labels = [...vis('#result-map .rm-shelter-label'), ...vis('#result-map .rm-home-label'), ...vis('#result-map .rm-escape-label')];
+    const names = vis('#result-map .rm-shelter-label');
+    const others = vis('#result-map .rm-shelter:not(.rm-target)');
+    const hit = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+    const out: string[] = [];
+    labels.forEach((a, i) => labels.forEach((b, j) => { if (i < j && hit(a, b)) out.push(`label${i}×label${j}`); }));
+    names.forEach((a) => others.forEach((b, j) => { if (hit(a, b)) out.push(`name×marker${j}`); }));
+    return out;
+  });
+  expect(boxes).toEqual([]);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: 'reports/riskmap-owase-crowd-390x844.png' });
 });

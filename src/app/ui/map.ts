@@ -102,13 +102,13 @@ export function createRiskMap(node: HTMLElement, o: RiskMapOptions): RiskMapHand
   // マスの色は津波タイルから読んだ値も使うので、どのモードでも出典を出す
   map.attributionControl.addAttribution(TSUNAMI_CREDIT_SHORT);
 
-  // ペインの重なり（下から）: マス 380 → 津波タイル 390 → 自宅の印・1km の円（overlay 400）→ 自宅のラベル 610
-  // → 逃げる方向 620 → 避難場所 650（いちばん上。マス・津波タイル・自宅の印に隠れない）
+  // ペインの重なり（下から）: マス 380 → 津波タイル 390 → 1km の円（overlay 400）→ 矢印 620
+  // → 避難場所 650（マス・津波タイル・矢印に隠れない）→ 自宅の印とラベル 655（いつも見える）→ 説明（ツールチップ）660
   map.createPane('mesh').style.zIndex = '380';
   map.createPane('tsunami').style.zIndex = '390';
-  map.createPane('homeLabel').style.zIndex = '610';
   map.createPane('escape').style.zIndex = '620';
   map.createPane('shelters').style.zIndex = '650';
+  map.createPane('home').style.zIndex = '655';
   // 説明（ツールチップ）は印より上に
   map.getPane('tooltipPane')!.style.zIndex = '660';
 
@@ -146,13 +146,14 @@ export function createRiskMap(node: HTMLElement, o: RiskMapOptions): RiskMapHand
 
   // 自宅（1km の円・印・ラベル）
   L.circle([o.home.lat, o.home.lon], { radius: 1000, color: '#5A6377', weight: 2, fill: false, dashArray: '6 6', interactive: false }).addTo(map);
-  const homeDot = L.circleMarker([o.home.lat, o.home.lon], { radius: kids ? 13 : 10, color: '#FFFFFF', weight: 3, fillColor: '#1F2A44', fillOpacity: 1 });
+  const homeDot = L.circleMarker([o.home.lat, o.home.lon], { pane: 'home', radius: kids ? 13 : 10, color: '#FFFFFF', weight: 3, fillColor: '#1F2A44', fillOpacity: 1, className: 'rm-home-dot' });
   if (!kids) homeDot.bindTooltip(tip('自宅（入力した場所）'));
   homeDot.addTo(map);
-  L.marker([o.home.lat, o.home.lon], {
-    pane: 'homeLabel', interactive: false, keyboard: false,
+  const homeLabel = L.marker([o.home.lat, o.home.lon], {
+    pane: 'home', interactive: false, keyboard: false,
     icon: L.divIcon({ className: 'rm-anchor', html: el('span', { class: kids ? 'rm-home-label rm-home-kids' : 'rm-home-label' }, kids ? 'おうち' : '自宅'), iconSize: [0, 0], iconAnchor: [-14, -12] }),
   }).addTo(map);
+  const homeR = kids ? 15 : 12;
 
   // 近い津波の避難場所への矢印（太い緑の矢印＋矢じり＋ラベル）。矢印は自宅の印と避難場所の印にかからないように、両端を少し短くする
   const escapeLayer = L.layerGroup();
@@ -163,16 +164,19 @@ export function createRiskMap(node: HTMLElement, o: RiskMapOptions): RiskMapHand
     const a = map.latLngToLayerPoint([o.home.lat, o.home.lon]);
     const bp = map.latLngToLayerPoint([t.shelter.pos.lat, t.shelter.pos.lon]);
     const len = a.distanceTo(bp);
-    const startGap = kids ? 18 : 15, endGap = kids ? 30 : 26, head = kids ? 22 : 18;
     if (!(len >= 1)) return; // 同じ地点（向きが決まらない）
     const ux = (bp.x - a.x) / len, uy = (bp.y - a.y) / len;
     const P = (d: number, side = 0) => map.layerPointToLatLng(L.point(a.x + ux * d - uy * side, a.y + uy * d + ux * side));
-    // 近くて印どうしが近いときも、矢印は消さずに最短の長さで描く（先は避難場所の印の下に入る。印のペインが上）
-    const tipD = Math.max(len - endGap, startGap + head + 14), baseD = tipD - head, w = kids ? 15 : 12;
+    // 始まりは自宅の印のふちから。先は避難場所の印の手前。近くて短いときも、軸 24px＋矢じりは必ず描く
+    // （先が避難場所の印の下に入ることがある。印のペインが上）
+    const head = kids ? 20 : 16, w = kids ? 14 : 11, startGap = homeR + 2, endGap = tsSize() / 2 + 3;
+    const tipD = Math.max(len - endGap, startGap + 24 + head), baseD = tipD - head;
     const line = [P(startGap), P(baseD + 2)];
     L.polyline(line, { pane: 'escape', color: '#FFFFFF', weight: kids ? 15 : 12, opacity: 0.9, lineCap: 'round', interactive: false }).addTo(escapeLayer);
     L.polyline(line, { pane: 'escape', color: GREEN, weight: kids ? 10 : 7, opacity: 1, lineCap: 'round', interactive: false, className: 'rm-arrow' }).addTo(escapeLayer);
     L.polygon([P(tipD), P(baseD, w), P(baseD, -w)], { pane: 'escape', color: '#FFFFFF', weight: 2, fillColor: GREEN, fillOpacity: 1, interactive: false, className: 'rm-arrow-head' }).addTo(escapeLayer);
+    // 画面で短い（70px 未満）ときは、矢印のラベルは出さない（地図の下の文で説明している）
+    if (len < 70) return;
     const mid = P((startGap + baseD) / 2);
     L.marker(mid, {
       pane: 'escape', interactive: false, keyboard: false, zIndexOffset: 100000,
@@ -180,73 +184,86 @@ export function createRiskMap(node: HTMLElement, o: RiskMapOptions): RiskMapHand
     }).addTo(escapeLayer);
   };
 
-  // 避難場所の印（専用ペイン。津波＝大きな緑の丸＋名前のラベル、地震＝小さめの青緑の印）
+  // 避難場所の印（専用ペイン。津波＝緑の丸、地震＝小さめの青緑の印）。大きさはズームで変える（縮小すると印どうしが重なるので小さく）
   const shelterLayer = L.layerGroup().addTo(map);
   const tsunamiIds = new Set(o.tsunamiShelters.map((s) => s.id));
   const quakePins: (L.Marker | null)[] = [];
   const tsunamiPins = new Map<string, L.Marker>();
-  const placed: { marker: L.Marker; pos: LatLon; make: (dx: number, dy: number, above?: boolean) => L.DivIcon; label?: boolean }[] = [];
-  const tSize = kids ? 48 : 40;
-  const labelIndex = o.escape ? o.escape.index : 0;
+  const resizers: (() => void)[] = [];
+  const zoomNow = () => map.getZoom();
+  function tsSize(): number { const z = zoomNow(); return (z <= 15 ? 28 : z === 16 ? 34 : 40) + (kids ? 8 : 0); }
+  const qSize = (): number => { const z = zoomNow(); return z <= 15 ? 18 : z === 16 ? 22 : 26; };
+  const targetId = o.escape?.shelter.id ?? null;
   o.tsunamiShelters.forEach((s, i) => {
     const q = o.quakeShelters.findIndex((x) => x.id === s.id);
     const name = kids ? `にげる ばしょ ${i + 1}` : `津波の避難場所 ${i + 1}${q >= 0 ? `（地震の避難場所 ${q + 1} と同じ）` : ''}：${s.name}`;
-    const make = (dx: number, dy: number) => L.divIcon({
-      className: `rm-shelter rm-shelter-tsunami${kids ? ' rm-kids' : ''}`, html: tsunamiIconHtml(i + 1, tSize),
-      iconSize: [tSize, tSize], iconAnchor: [tSize / 2 - dx, tSize / 2 - dy],
-    });
-    const m = L.marker([s.pos.lat, s.pos.lon], { pane: 'shelters', icon: make(0, 0), title: name, alt: name, keyboard: !kids, riseOnHover: true });
-    if (!kids) m.bindTooltip(tip(name), { direction: 'top', offset: [0, -tSize / 2] });
+    const target = s.id === targetId;
+    const make = () => {
+      const t = tsSize();
+      return L.divIcon({
+        className: `rm-shelter rm-shelter-tsunami${kids ? ' rm-kids' : ''}${t < 34 ? ' rm-sm' : ''}${target ? ' rm-target' : ''}`, html: tsunamiIconHtml(i + 1, t),
+        iconSize: [t, t], iconAnchor: [t / 2, t / 2],
+      });
+    };
+    // 逃げる先の印は、ほかの印より上に（白い縁を太く・少し大きく）
+    const m = L.marker([s.pos.lat, s.pos.lon], { pane: 'shelters', icon: make(), title: name, alt: name, keyboard: !kids, riseOnHover: true, zIndexOffset: target ? 50000 : 0 });
+    if (!kids) m.bindTooltip(tip(name), { direction: 'top', offset: [0, -14] });
     m.addTo(shelterLayer);
     tsunamiPins.set(s.id, m);
-    placed.push({ marker: m, pos: s.pos, make });
-    if (i === labelIndex) {
-      // 名前のラベル（白地・緑の枠・太字）。こどもは「にげる ばしょ」
-      // above = 印の上に出す（下に出すと自宅の印に重なるとき）
-      const lab = (dx: number, dy: number, above = false) => L.divIcon({
-        className: 'rm-anchor',
-        html: el('span', { class: `rm-shelter-label${kids ? ' rm-label-kids' : ''}${above ? ' rm-label-above' : ''}` }, kids ? 'にげる ばしょ' : s.name),
-        iconSize: [0, 0], iconAnchor: above ? [-dx, tSize / 2 + 3 - dy] : [-dx, -(tSize / 2 + 3) - dy],
-      });
-      const lm = L.marker([s.pos.lat, s.pos.lon], { pane: 'shelters', icon: lab(0, 0), interactive: false, keyboard: false, zIndexOffset: 100000 });
-      lm.addTo(shelterLayer);
-      placed.push({ marker: lm, pos: s.pos, make: lab, label: true });
-    }
+    resizers.push(() => m.setIcon(make()));
   });
   o.quakeShelters.forEach((s, i) => {
     // 津波の避難場所と同じ場所は、津波の印だけ（印が重ならないように）
     if (tsunamiIds.has(s.id)) { quakePins.push(null); return; }
     const name = kids ? `じしんの ときの ばしょ ${i + 1}` : `地震の避難場所 ${i + 1}：${s.name}`;
-    const make = (dx: number, dy: number) => L.divIcon({
-      className: 'rm-shelter rm-shelter-quake', html: `<span>${i + 1}</span>`, iconSize: [26, 26], iconAnchor: [13 - dx, 13 - dy],
-    });
-    const m = L.marker([s.pos.lat, s.pos.lon], { pane: 'shelters', icon: make(0, 0), title: name, alt: name, keyboard: !kids });
-    if (!kids) m.bindTooltip(tip(name), { direction: 'top', offset: [0, -14] });
+    const make = () => {
+      const t = qSize();
+      return L.divIcon({ className: `rm-shelter rm-shelter-quake${t < 22 ? ' rm-sm' : ''}`, html: `<span>${i + 1}</span>`, iconSize: [t, t], iconAnchor: [t / 2, t / 2] });
+    };
+    const m = L.marker([s.pos.lat, s.pos.lon], { pane: 'shelters', icon: make(), title: name, alt: name, keyboard: !kids });
+    if (!kids) m.bindTooltip(tip(name), { direction: 'top', offset: [0, -10] });
     m.addTo(shelterLayer);
     quakePins.push(m);
-    placed.push({ marker: m, pos: s.pos, make });
+    resizers.push(() => m.setIcon(make()));
   });
-  // 自宅の印と重なる避難場所の印は、右上へずらす（どちらも見えるように）。名前のラベルは、枠が自宅の印にかかるなら印の上へ。
-  // ズームのたびに見直す
-  const homeR = kids ? 15 : 12;
-  const avoidHome = (): void => {
-    const h = map.latLngToLayerPoint([o.home.lat, o.home.lon]);
+
+  // 名前のラベルは逃げる先だけ（こどもは「にげる ばしょ」）。ほかの印・自宅の印とラベルに重なるなら、下→上→右→左の順に試し、
+  // どこも重なるなら出さない（凡例と地図の下の文で名前が分かる）
+  const LABEL_POS = ['below', 'above', 'right', 'left'] as const;
+  type LabelPos = (typeof LABEL_POS)[number] | 'hidden';
+  const target = o.escape ? o.tsunamiShelters.find((s) => s.id === targetId) ?? null : null;
+  const labelIcon = (pos: LabelPos) => {
+    const g = tsSize() / 2 + 3;
+    const anchor: [number, number] = pos === 'below' ? [0, -g] : pos === 'above' ? [0, g] : pos === 'right' ? [-g, 0] : pos === 'left' ? [g, 0] : [0, 0];
+    return L.divIcon({
+      className: 'rm-anchor',
+      html: el('span', { class: `rm-shelter-label rm-pos-${pos}${kids ? ' rm-label-kids' : ''}` }, kids ? 'にげる ばしょ' : target!.name),
+      iconSize: [0, 0], iconAnchor: anchor,
+    });
+  };
+  const labelMarker = target
+    ? L.marker([target.pos.lat, target.pos.lon], { pane: 'shelters', icon: labelIcon('below'), interactive: false, keyboard: false, zIndexOffset: 100000 }).addTo(shelterLayer)
+    : null;
+  const overlaps = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  const placeLabel = (): void => {
+    if (!labelMarker || !target) return;
+    const others: DOMRect[] = [];
+    tsunamiPins.forEach((m, id) => { if (id !== target.id) { const r = m.getElement()?.getBoundingClientRect(); if (r) others.push(r); } });
+    quakePins.forEach((m) => { const r = m?.getElement()?.getBoundingClientRect(); if (r) others.push(r); });
+    const hl = homeLabel.getElement()?.firstElementChild?.getBoundingClientRect();
+    if (hl) others.push(hl);
     const box = node.getBoundingClientRect();
     const hc = map.latLngToContainerPoint([o.home.lat, o.home.lon]);
-    const hx = box.left + hc.x, hy = box.top + hc.y;
-    const hitsHome = (m: L.Marker): boolean => {
-      const r = m.getElement()?.firstElementChild?.getBoundingClientRect();
-      if (!r || r.width === 0) return false;
-      return hx + homeR > r.left && hx - homeR < r.right && hy + homeR > r.top && hy - homeR < r.bottom;
-    };
-    for (const p of placed) {
-      const q = map.latLngToLayerPoint([p.pos.lat, p.pos.lon]);
-      const near = h.distanceTo(q) < (kids ? 34 : 28);
-      const dx = near ? 30 : 0, dy = near ? -30 : 0;
-      p.marker.setIcon(p.make(dx, dy));
-      if (p.label && hitsHome(p.marker)) p.marker.setIcon(p.make(dx, dy, true));
+    others.push(new DOMRect(box.left + hc.x - homeR, box.top + hc.y - homeR, homeR * 2, homeR * 2));
+    for (const pos of LABEL_POS) {
+      labelMarker.setIcon(labelIcon(pos));
+      const r = labelMarker.getElement()?.firstElementChild?.getBoundingClientRect();
+      if (!r || r.width === 0) return; // 地図が見えていない（大きさ 0）。表示したあと refresh で決める
+      if (!others.some((o2) => o2.width > 0 && overlaps(r, o2))) return;
     }
+    labelMarker.setIcon(labelIcon('hidden'));
   };
+  const relayout = (): void => { resizers.forEach((f) => f()); placeLabel(); };
 
   const applyMode = (): void => {
     drawCells();
@@ -254,8 +271,8 @@ export function createRiskMap(node: HTMLElement, o: RiskMapOptions): RiskMapHand
     if (mode !== 'shake' && o.escape) { escapeLayer.addTo(map); drawEscape(); } else escapeLayer.remove();
   };
   applyMode();
-  avoidHome();
-  map.on('zoomend', () => { avoidHome(); if (map.hasLayer(escapeLayer)) drawEscape(); });
+  relayout();
+  map.on('zoomend', () => { relayout(); if (map.hasLayer(escapeLayer)) drawEscape(); });
 
   let fitted = false;
   const refresh = (): void => {
@@ -271,7 +288,7 @@ export function createRiskMap(node: HTMLElement, o: RiskMapOptions): RiskMapHand
       const b = L.latLng(o.home.lat, o.home.lon).toBounds(2000).extend(t);
       map.fitBounds(b, { paddingTopLeft: [8, 8], paddingBottomRight: [8, 28], maxZoom: 16, animate: false });
     }
-    avoidHome();
+    relayout();
     if (map.hasLayer(escapeLayer)) drawEscape();
   };
   refresh();
