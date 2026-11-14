@@ -12,6 +12,7 @@ import { computeScenario, createLatestOnly, createScenarioRunner, type Scenario,
 import { evacuationViewModel, homeTsunamiVM, type EvacVM, locationNote, type LocationSource } from './viewmodel.ts';
 import { DISCLAIMER, DISCLAIMER_DETAIL, clear, el } from './ui/dom.ts';
 import { clearLast, loadLast, saveLast, savedShelters } from './storage.ts';
+import { renderIntro } from './ui/intro.ts';
 import { renderLast } from './ui/last.ts';
 import { renderInput } from './ui/input.ts';
 import { renderResult } from './ui/result.ts';
@@ -58,7 +59,9 @@ const nearRoot = el('div', { id: 'near', hidden: true });
 const kidsInputNote = el('p', { class: 'kid-input-note', id: 'kids-input-note', hidden: true }, KIDS_TEXT.inputNote);
 /** 入力画面の上の大きなボタン「📍 いまいる場所から近い避難場所」 */
 const nearEntry = el('a', { href: '#near', class: 'btn-link near-entry', id: 'near-entry' });
-const mainView = el('div', { id: 'main-view' }, nearEntry, kidsInputNote, inputRoot, resultRoot);
+/** 1ページ目のサイト説明と「住所の扱い」 */
+const introRoot = el('div', { id: 'intro' });
+const mainView = el('div', { id: 'main-view' }, introRoot, nearEntry, kidsInputNote, inputRoot, resultRoot);
 
 // ---- こども / おとな（表示だけ。計算・保存・共有の文面は同じ）------------------------
 let kids = loadKids(localStore());
@@ -72,6 +75,7 @@ function drawHeader(): void {
   titleNode.textContent = kids ? KIDS_TEXT.title : '南海トラフ 住まいの被害シミュレーター';
   headerNote.replaceChildren(...(kids ? [el('strong', {}, KIDS_TEXT.disclaimer)] : [el('strong', {}, DISCLAIMER), el('p', {}, DISCLAIMER_DETAIL)]));
   kidsInputNote.hidden = !kids;
+  drawIntro();
   nearEntry.replaceChildren(headingIcon('📍'), kids ? KIDS_NEAR.entry : NEAR_TEXT.entry);
 }
 function setKids(on: boolean): void {
@@ -118,12 +122,20 @@ function localStore(): Storage | null {
   try { return window.localStorage; } catch { return null; }
 }
 
+function drawIntro(): void {
+  const st = localStore();
+  let hasLast = false;
+  try { hasLast = !!(st && loadLast(st)); } catch { hasLast = false; }
+  renderIntro(introRoot, { compact: hasLast, kids });
+}
+
 function showLast(): void {
+  drawIntro();
   const st = localStore();
   try {
     const saved = st ? loadLast(st) : null;
     if (!st || !saved) { clear(lastRoot); return; }
-    renderLast(lastRoot, saved, { online: navigator.onLine, onDelete: () => { clearLast(st); clear(lastRoot); } });
+    renderLast(lastRoot, saved, { online: navigator.onLine, onDelete: () => { clearLast(st); clear(lastRoot); drawIntro(); } });
   } catch {
     // 保存値が壊れていてもアプリは起動する。壊れた値は捨てる。
     if (st) clearLast(st);
@@ -372,7 +384,8 @@ function showNear(): void {
 }
 
 async function showRoute(): Promise<void> {
-  const about = location.hash === '#about';
+  const privacy = location.hash === '#privacy';
+  const about = location.hash === '#about' || privacy;
   const practice = location.hash === '#practice';
   const family = location.hash === '#family';
   const near = location.hash === '#near';
@@ -406,7 +419,8 @@ async function showRoute(): Promise<void> {
     let m: Manifest | null = null;
     try { m = await ds.manifest(); } catch { /* 出典一覧なしで表示 */ }
     renderAbout(aboutRoot, m);
-    window.scrollTo(0, 0);
+    const sec = privacy ? document.getElementById('privacy') : null;
+    if (sec) sec.scrollIntoView(); else window.scrollTo(0, 0);
   }
 }
 window.addEventListener('hashchange', showRoute);

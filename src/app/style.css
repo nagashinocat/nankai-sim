@@ -486,3 +486,13 @@ button.rm-pick-ok { background: #C2261B; color: #FFFFFF; border-color: #C2261B; 
 .risk-map.rm-picking .leaflet-home-pane, .risk-map.rm-picking .leaflet-escape-pane { opacity: 0.3; }
 .risk-map.rm-picking { outline: 3px solid #C2261B; outline-offset: -3px; }
 .risk-map.rm-picking .leaflet-home-pane { pointer-events: none; }
+
+/* 1ページ目のサイト説明・住所の扱い */
+.intro-what ul { margin: 0.25rem 0 0; padding-left: 1.2rem; line-height: 1.6; }
+.intro-what h2, .intro-addr h2 { font-size: 1.05rem; margin: 0 0 0.25rem; }
+.intro-addr { border: 2px solid #1b6e3c; background: #f1f8f3; }
+.intro-addr-list { list-style: none; margin: 0.25rem 0 0.25rem; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; line-height: 1.55; }
+.intro-addr-list li { display: flex; gap: 0.5rem; align-items: flex-start; }
+.intro-mark { flex: none; font-size: 1.1rem; line-height: 1.4; }
+.intro-more { font-weight: 700; }
+.intro-line { margin: 0.25rem 0 0.5rem; font-size: 0.92rem; color: #2b3a2f; background: #f1f8f3; border: 1px solid #b9d8c2; border-radius: 10px; padding: 0.5rem 0.75rem; }
