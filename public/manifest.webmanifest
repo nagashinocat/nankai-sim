@@ -1,0 +1,16 @@
+{
+  "name": "南海トラフ 住まいの被害シミュレーター",
+  "short_name": "南海トラフ備え",
+  "description": "南海トラフ地震で、お住まいの被害の目安・近い避難場所を表示します（統計的な目安です）。",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#1f4e79",
+  "background_color": "#f6f5f1",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

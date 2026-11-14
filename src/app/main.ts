@@ -23,11 +23,26 @@ import { KIDS_TEXT, loadKids, saveKids } from './kids.ts';
 import { modeToggle, renderFamilyKids } from './ui/kids.ts';
 import type { ResultHandle } from './ui/result.ts';
 import { HAZARD_ATTRIBUTION } from './text.ts';
+import { KIDS_NEAR } from './kids.ts';
+import { NEAR_TEXT } from './near.ts';
+import { renderNear, type NearHandle } from './ui/near.ts';
+import { headingIcon } from './ui/visuals.ts';
+import { renderOfflinePanel } from './ui/offline-panel.ts';
+import { savedIndex } from './offline.ts';
 
 useFragilityTable(fragility as never);
 
 const fetcher = (url: string) => fetch(url);
 const ds = createDataSource(fetcher, `${import.meta.env.BASE_URL}data`);
+/** 避難場所のデータを端末に保存する欄（#near・結果画面のおとなの表示だけ。おうちの人の操作） */
+const dataBaseUrl = (): string => new URL(`${import.meta.env.BASE_URL}data`, location.href).href;
+const offlinePanel = (): HTMLElement | null => renderOfflinePanel({
+  base: dataBaseUrl(),
+  store: localStore(),
+  caches: typeof caches !== 'undefined' ? caches : null,
+  fetch: (url, init) => fetch(url, init),
+  online: () => navigator.onLine,
+});
 const tileReader = canvasPixelReader();
 /** 周辺1kmの各マス中心の津波は、タイル数を抑えるため2段階粗いズーム（約1.2km四方のタイル）で読む。 */
 const AREA_TSUNAMI_ZOOM = TSUNAMI_TILE_ZOOM - 2;
@@ -38,8 +53,11 @@ const resultRoot = el('div', { id: 'result', 'aria-live': 'polite' });
 const aboutRoot = el('div', { id: 'about', hidden: true });
 const practiceRoot = el('div', { id: 'practice', hidden: true });
 const familyRoot = el('div', { id: 'family', hidden: true });
+const nearRoot = el('div', { id: 'near', hidden: true });
 const kidsInputNote = el('p', { class: 'kid-input-note', id: 'kids-input-note', hidden: true }, KIDS_TEXT.inputNote);
-const mainView = el('div', { id: 'main-view' }, kidsInputNote, inputRoot, resultRoot);
+/** 入力画面の上の大きなボタン「📍 いまいる場所から近い避難場所」 */
+const nearEntry = el('a', { href: '#near', class: 'btn-link near-entry', id: 'near-entry' });
+const mainView = el('div', { id: 'main-view' }, nearEntry, kidsInputNote, inputRoot, resultRoot);
 
 // ---- こども / おとな（表示だけ。計算・保存・共有の文面は同じ）------------------------
 let kids = loadKids(localStore());
@@ -53,6 +71,7 @@ function drawHeader(): void {
   titleNode.textContent = kids ? KIDS_TEXT.title : '南海トラフ 住まいの被害シミュレーター';
   headerNote.replaceChildren(...(kids ? [el('strong', {}, KIDS_TEXT.disclaimer)] : [el('strong', {}, DISCLAIMER), el('p', {}, DISCLAIMER_DETAIL)]));
   kidsInputNote.hidden = !kids;
+  nearEntry.replaceChildren(headingIcon('📍'), kids ? KIDS_NEAR.entry : NEAR_TEXT.entry);
 }
 function setKids(on: boolean): void {
   if (on === kids) return;
@@ -64,13 +83,27 @@ function setKids(on: boolean): void {
   resultHandle?.setKids(on);
   setTimeout(() => resultRoot.setAttribute('aria-live', 'polite'), 500);
   if (location.hash === '#family') void showRoute();
+  nearHandle?.setKids(on);
+  drawOffline();
 }
 drawHeader();
 
+// ---- 電波なしの帯 ----
+const offlineBar = el('div', { class: 'offline-bar', id: 'offline-bar', role: 'status', hidden: true });
+function drawOffline(): void {
+  const off = !navigator.onLine;
+  offlineBar.hidden = !off;
+  offlineBar.replaceChildren(...(off ? [kids ? KIDS_NEAR.offline : '電波がありません。近い避難場所（保存済みなら）・前回の結果・家族の決まりは見られます'] : []));
+}
+window.addEventListener('online', drawOffline);
+window.addEventListener('offline', drawOffline);
+
 app.append(
+  offlineBar,
   el('header', {}, el('div', { class: 'header-top' }, titleNode, toggle.node), headerNote),
-  mainView, aboutRoot, practiceRoot, familyRoot,
+  mainView, aboutRoot, practiceRoot, familyRoot, nearRoot,
   el('footer', {},
+    el('p', {}, el('a', { href: '#near', id: 'near-footer-link' }, `📍 ${NEAR_TEXT.entry}`)),
     el('p', { class: 'hint', id: 'hazard-attribution' }, HAZARD_ATTRIBUTION),
     el('p', {}, el('a', { href: '#about' }, 'このアプリについて（計算方法・出典・プライバシー）')),
     el('p', {}, el('a', { href: '#family', id: 'family-footer-link' }, FAMILY_ENTRY))),
@@ -194,6 +227,7 @@ async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise
   try {
   handle = renderResult(resultRoot, {
     pos, municipality, result: l2, evac, evacShelters, locationNote: locationNote(where), tsunami: homeTsunamiVM(homeTsunami, arrival), kids,
+    offlinePanel,
   }, {
     onSelect: (s) => void show(s),
     onRetry: (s) => void show(s),
@@ -248,15 +282,41 @@ async function guarded(fn: () => Promise<void>): Promise<void> {
   }
 }
 
+// ---- #near（いまいる場所から近い避難場所）。現在地はこの画面のメモリだけ。離れたら捨てる ----
+let nearHandle: NearHandle | null = null;
+function showNear(): void {
+  nearHandle?.dispose();
+  nearHandle = renderNear(nearRoot, {
+    kids,
+    geolocation: navigator.geolocation,
+    sheltersNear: (pos, r) => ds.sheltersNear(pos, r),
+    tsunami: (pos) => tsunamiAround(pos, tileReader),
+    online: () => navigator.onLine,
+    onAdult: () => setKids(false),
+    onExit: () => { location.hash = ''; },
+    savePanel: offlinePanel,
+    covers: (pos) => ds.covers('L2', latLonToMesh250(pos)),
+    isSaved: async () => typeof caches !== 'undefined' && (await savedIndex(caches, dataBaseUrl())) !== null,
+  });
+}
+
 async function showRoute(): Promise<void> {
   const about = location.hash === '#about';
   const practice = location.hash === '#practice';
   const family = location.hash === '#family';
+  const near = location.hash === '#near';
   if (!family) { flushFamily(); document.body.classList.remove('family-printing'); }
-  mainView.hidden = about || practice || family;
+  if (!near && nearHandle) { nearHandle.dispose(); nearHandle = null; }
+  mainView.hidden = about || practice || family || near;
   aboutRoot.hidden = !about;
   practiceRoot.hidden = !practice;
   familyRoot.hidden = !family;
+  nearRoot.hidden = !near;
+  if (near) {
+    if (!nearHandle) showNear();
+    window.scrollTo(0, 0);
+    return;
+  }
   if (family) {
     if (kids) {
       flushFamily();
@@ -280,6 +340,7 @@ async function showRoute(): Promise<void> {
 }
 window.addEventListener('hashchange', showRoute);
 showLast();
+drawOffline();
 
 // Service Worker は本番ビルドのみ（開発サーバーでキャッシュが邪魔をしないように）。
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {

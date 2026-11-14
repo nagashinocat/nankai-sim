@@ -343,3 +343,41 @@ body.kids .kids-result, body.kids .kid-family, body.kids .kid-player, body.kids 
 body.kids .h-icon, body.kids footer { display: none; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .kid-cap .kid-note.kid-note-red { color: #B3261E; font-weight: 700; }
+
+/* ---- 簡易地図（方向と距離。地図画像は使わない） ---- */
+.minimap { margin: 8px 0 12px; padding: 10px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+.minimap-svg { display: block; width: 100%; max-width: 280px; height: auto; margin: 0 auto; }
+.minimap-text { font-weight: 700; font-size: 1.05rem; margin: 6px 0 2px; overflow-wrap: anywhere; }
+.minimap-caution { font-size: 0.95rem; font-weight: 700; color: #6b4a00; margin: 0 0 4px; }
+.minimap-status { margin: 0; font-size: 0.9rem; }
+.minimap-compass { min-height: 48px; margin: 6px 0 0; }
+.kid-minimap { border: 2px solid var(--k-line, #EADFCB); border-radius: 20px; }
+.kid-minimap .minimap-text { font-size: 22px; font-weight: 900; }
+.kid-minimap .minimap-caution { color: var(--k-ink, #1F2A44); font-weight: 500; }
+
+/* ---- #near（いまいる場所から近い避難場所） ---- */
+.near-entry { border-color: #1b6b3a; color: #1b6b3a; font-size: 1.05rem; margin: 4px 0 12px; }
+#near-entry { margin-top: 0; }
+.map-toggle-wrap { margin: 4px 0 6px; }
+button.map-toggle { display: inline-block; width: auto; min-height: 44px; margin: 4px 0 0; padding: 6px 14px; font-size: 0.95rem; }
+ol.shelters li { margin-bottom: 8px; }
+.near-error { color: #6b1a14; }
+ul.near-todo { padding-left: 1.2em; }
+ul.near-todo li { margin-bottom: 6px; }
+.near-notices { margin: 0 0 12px; }
+.kid-near-root { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.kid-near-root > button.primary { background: var(--k-blue, #2F6FDB); border-color: var(--k-blue, #2F6FDB); border-radius: 16px; font-size: 18px; }
+.kid-near-name { font-size: 20px; font-weight: 900; overflow-wrap: anywhere; }
+.kid-near-tsunami { font-weight: 700; }
+.kid-near-tsunami.kid-red { color: var(--k-red-text, #B3261E); }
+.kid-near-notices { font-size: 14px; }
+body.kids .near-entry { border-color: var(--k-blue, #2F6FDB); color: var(--k-blue, #2F6FDB); border-radius: 16px; }
+
+/* ---- 電波なし・端末に保存 ---- */
+.offline-bar { margin: 0 -12px 8px; padding: 8px 12px; background: #3a3a3a; color: #fff; font-weight: 700; font-size: 0.95rem; line-height: 1.5; }
+.offline-panel h2 { font-size: 1.05rem; }
+.offline-progress { display: block; width: 100%; height: 14px; margin: 4px 0; }
+body.kids .near-error { color: var(--k-ink, #1F2A44); }
+body.kids .near-offline-first { border-color: #F0A040; }
+.near-sea-first { color: #6b1a14; }
+body.kids .kid-near-sea { color: var(--k-ink, #1F2A44); font-weight: 700; }

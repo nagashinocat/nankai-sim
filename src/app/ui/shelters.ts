@@ -12,27 +12,53 @@ export type ShelterListLike = {
 export const SHELTER_HEADING = { earthquake: '地震の避難場所（近い順）', tsunami: '津波の避難場所（近い順）' } as const;
 const REACH_MARK: Record<string, string> = { [REACH_TEXT.ok]: '○', [REACH_TEXT.tight]: '△', [REACH_TEXT.no]: '×' };
 
-/** 地震・津波の避難場所リストと、必ず出す注意（結果画面と前回の結果で共通）。 */
-export function shelterListNodes(lists: ShelterListLike[]): Node[] {
+/**
+ * 地震・津波の避難場所リストと、必ず出す注意（結果画面と前回の結果で共通）。
+ * mapFor があれば、各項目に「🗺 地図」（押すとその場で簡易地図を開閉）を付ける（結果画面だけ。前回の結果は座標を持たない）。
+ */
+export function shelterListNodes(lists: ShelterListLike[], mapFor?: (listIndex: number, itemIndex: number) => (() => HTMLElement) | null): Node[] {
   const out: Node[] = [];
-  for (const e of lists) {
+  for (const [li, e] of lists.entries()) {
     out.push(el('h3', {}, SHELTER_HEADING[e.hazard]));
     if (e.hazard === 'earthquake') out.push(el('p', { class: 'hint' }, '津波のおそれがあるときは、下の「津波の避難場所」へ逃げてください。'));
     if (e.items.length === 0) out.push(el('p', {}, '近くに該当する避難場所のデータがありません。'));
     else
-      out.push(el('ol', { class: 'shelters' }, ...e.items.map((it) => el('li', {},
-        el('strong', {}, it.name), el('br'),
-        `直線距離 ${it.distance}　徒歩の目安 標準${it.walkStandard}／ゆっくり${it.walkSlow}`,
-        it.reachText ? [el('br'), el('span', { class: 'reach' }, `${REACH_MARK[it.reachText] ?? ''} ${it.reachText}`.trim())] : null))));
+      out.push(el('ol', { class: 'shelters' }, ...e.items.map((it, ii) => {
+        const make = mapFor?.(li, ii) ?? null;
+        return el('li', {},
+          el('strong', {}, it.name), el('br'),
+          `直線距離 ${it.distance}　徒歩の目安 標準${it.walkStandard}／ゆっくり${it.walkSlow}`,
+          it.reachText ? [el('br'), el('span', { class: 'reach' }, `${REACH_MARK[it.reachText] ?? ''} ${it.reachText}`.trim())] : null,
+          make ? mapToggle(make, false) : null);
+      })));
     if (e.hazard === 'tsunami' && e.items.some((it) => it.reachText && it.reachText !== REACH_TEXT['n/a']))
       out.push(el('p', { class: 'hint' }, reachHintText(e.arrivalCm)));
   }
-  out.push(
+  out.push(...shelterNoticeNodes());
+  return out;
+}
+
+/** 徒歩時間の説明・国土地理院の避難場所の注意（そのまま）・出典。 */
+export function shelterNoticeNodes(): HTMLElement[] {
+  return [
     el('p', { class: 'hint' }, `徒歩時間は直線距離からの目安です（直線距離×${DETOUR_FACTOR}を道のりとし、標準${WALK_SPEED.standard.toFixed(1)}m/s・ゆっくり${WALK_SPEED.slow.toFixed(1)}m/sで計算）。`),
     el('ul', { class: 'notices' }, ...SHELTER_NOTICES.map((n) => el('li', {}, n))),
     el('p', { class: 'hint' }, SHELTER_SOURCE),
-  );
-  return out;
+  ];
+}
+
+/** 「🗺 地図」ボタンと、押すとその下に開く簡易地図（開くたびに作る）。open = 最初から開いておく。 */
+export function mapToggle(make: () => HTMLElement, open: boolean, labels: { open: string; close: string } = { open: '🗺 地図', close: '🗺 地図を閉じる' }): HTMLElement {
+  const slot = el('div', { class: 'map-slot' });
+  const btn = el('button', { type: 'button', class: 'secondary map-toggle', 'aria-expanded': 'false' }, labels.open);
+  const set = (on: boolean): void => {
+    btn.setAttribute('aria-expanded', String(on));
+    btn.textContent = on ? labels.close : labels.open;
+    slot.replaceChildren(...(on ? [make()] : []));
+  };
+  btn.addEventListener('click', () => set(btn.getAttribute('aria-expanded') !== 'true'));
+  if (open) set(true);
+  return el('div', { class: 'map-toggle-wrap' }, btn, slot);
 }
 
 /** 津波の注意（結果・前回の結果の上の方に必ず出す。裁定 F2）。 */

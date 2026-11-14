@@ -16,6 +16,9 @@ import { FAMILY_LINK_RESULT } from './family.ts';
 import { playerLauncher, type Launcher } from './player.ts';
 import { KIDS_TAB_LABELS } from '../kids.ts';
 import { kidsIntro, kidsResultNodes } from './kids.ts';
+import { minimapModel } from '../minimap.ts';
+import { MINIMAP_SIZE, renderMinimap } from './minimap.ts';
+import { NEAR_TEXT } from '../near.ts';
 
 export type ResultData = {
   pos: LatLon;
@@ -31,6 +34,8 @@ export type ResultData = {
   tsunami: TsunamiVM;
   /** こどもモードで出す（表示だけ。計算・保存は同じ） */
   kids?: boolean;
+  /** 避難場所のデータを端末に保存する欄（避難場所の下に出す） */
+  offlinePanel?: () => HTMLElement | null;
 };
 
 export type ResultHooks = {
@@ -110,7 +115,15 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
   // 対応範囲外（隣県など）では避難場所を出さない。5県のデータだけの一覧は、その場所の避難場所が欠けて向きを誤らせる（Ruling F1）。
   // 範囲外かどうかは場所で決まり、タブでは変わらない。
   const outside = d.result.home.status === 'outside';
-  const evacSection = outside ? null : el('section', { class: 'card', id: 'evac' }, el('h2', {}, headingIcon('🏃'), '避難できる場所'), ...shelterListNodes(d.evac));
+  // 「🗺 地図」: 中心は自宅（計算に使った位置。保存しない）、ほかの点は同じリストの避難場所
+  const mapFor = (li: number, ii: number): (() => HTMLElement) | null => {
+    const list = d.evacShelters[li] ?? [];
+    const s = list[ii];
+    return s ? () => renderMinimap(minimapModel(d.pos, s, list, MINIMAP_SIZE), { center: 'home' }) : null;
+  };
+  const evacSection = outside ? null : el('section', { class: 'card', id: 'evac' }, el('h2', {}, headingIcon('🏃'), '避難できる場所'), ...shelterListNodes(d.evac, mapFor),
+    el('a', { href: '#near', class: 'btn-link near-entry', id: 'near-entry-result' }, headingIcon('📍'), NEAR_TEXT.entry));
+  const panel0 = outside ? null : d.offlinePanel?.() ?? null;
   const mapShelters = outside ? [] : d.evacShelters[0] ?? [];
 
   const shareOf = (r: ScenarioResult): string | null => {
@@ -134,6 +147,7 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
   ];
   const adultBottom = [
     ...(evacSection ? [evacSection] : []),
+    ...(panel0 ? [panel0] : []),
     el('a', { href: '#family', class: 'btn-link', id: 'family-entry' }, FAMILY_LINK_RESULT), actions,
     el('a', { href: '#practice', class: 'btn-link', id: 'practice-entry' }, PRACTICE_ENTRY),
   ];

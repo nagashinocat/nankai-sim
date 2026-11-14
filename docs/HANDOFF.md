@@ -9,10 +9,10 @@
 
 | 項目 | 状態 |
 |---|---|
-| アプリ本体 | master `a88230c` まで完成。テスト 単体301件・画面69件・オフライン1件がすべて通る |
+| アプリ本体 | master `a88230c` まで完成。テスト 単体301件・画面69件・オフライン1件がすべて通る。branch `near-shelters` では 単体331件・画面80件・オフライン3件 |
 | 公開 | **公開中** https://nagashinocat.github.io/nankai-sim/ （2026-11-14、GitHub Pages・gh-pages ブランチ）。内閣府は 2026-11-12 に「出典を明記すれば使用可」と回答 |
 | 試作版 | 外部通信なしで5か所だけ見られる版（`vite.demo.config.ts`、`demo/`）。Mac の `~/Documents/nankai-sim-preview`（全データ入り、`start.command` で同じ Wi-Fi のスマホから見られる） |
-| 次の作業 | 「いまいる場所から近い避難場所＋簡易地図＋電波なしで使う」の設計案を出したところ（利用者の OK 待ち）。`docs/superpowers/specs/2026-11-12-near-shelters-offline-design.md` |
+| 次の作業 | 「いまいる場所から近い避難場所（#near）＋簡易地図＋電波なしで使う」を branch `near-shelters` に実装済み（2026-11-14）。master への取り込み・公開（gh-pages 更新）・本番での確認がまだ。`docs/superpowers/specs/2026-11-12-near-shelters-offline-design.md` |
 
 ## 2. できていること
 
@@ -25,6 +25,7 @@
 7. **👪 家族の決まり**（`#family`）: 避難先・集合場所・連絡（171/web171）・予定・持ち出す物。端末内だけに保存、文面コピー、印刷用表示
 8. **こどもモード**: 「こども／おとな」切替。小学1〜3年向けの言葉・ふりがな・絵
 9. **オフライン**: Service Worker でアプリ本体と見たデータを保存。前回の結果（住所・座標なし）を端末に保存
+10. **📍 いまいる場所から近い避難場所**（`#near`、branch `near-shelters`）: GPS（押したときだけ・保存しない）から津波・地震の避難場所5件ずつ、簡易地図（SVG、方向と距離、コンパスで向きを合わせる）。結果画面の避難場所にも「🗺 地図」。避難場所のデータ（約3.3MB）を端末に保存すると電波なしでも使える（専用キャッシュ `nankai-offline-shelters-v1`）。電波なしの帯、ホーム画面に追加（manifest・アイコン `scripts/make_icons.ts`）
 
 ## 3. データと出典
 
@@ -69,8 +70,8 @@ npm run dev                               # http://localhost:5173（public/data 
 
 ## 7. 文書の一覧
 
-- 設計: `docs/superpowers/specs/`（全体、津波、近い避難場所＋オフライン[案]）
-- 計画: `docs/superpowers/plans/`（計算エンジン、パイプライン、Web v1、津波と東海、半割れと時間差、練習モード）
+- 設計: `docs/superpowers/specs/`（全体、津波、近い避難場所＋オフライン）
+- 計画: `docs/superpowers/plans/`（計算エンジン、パイプライン、Web v1、津波と東海、半割れと時間差、練習モード、近い避難場所＋オフライン）
 - 判断記録: `docs/superpowers/notes/`
 - 照合: `docs/reports/`
 - 公開: `docs/publishing.md`
