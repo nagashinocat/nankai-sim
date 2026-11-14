@@ -62,6 +62,12 @@ export type RiskMapHandle = {
   /** 地図の大きさが変わった（表示した）あとに呼ぶ。逃げる先が見えるように合わせる */
   refresh(): void;
   remove(): void;
+  /** 「ピンを動かす」: 地図を今の地点に合わせ、中央に十字を出す（自宅の印は薄く） */
+  startPick(): void;
+  /** 十字の位置（地図の中央） */
+  pickCenter(): LatLon;
+  /** 十字を消す。keepView=false なら始める前の表示にもどす */
+  endPick(keepView?: boolean): void;
 };
 
 const GREEN = '#1B6E3C';
@@ -147,7 +153,7 @@ export function createRiskMap(node: HTMLElement, o: RiskMapOptions): RiskMapHand
   // 自宅（1km の円・印・ラベル）
   L.circle([o.home.lat, o.home.lon], { radius: 1000, color: '#5A6377', weight: 2, fill: false, dashArray: '6 6', interactive: false }).addTo(map);
   const homeDot = L.circleMarker([o.home.lat, o.home.lon], { pane: 'home', radius: kids ? 13 : 10, color: '#FFFFFF', weight: 3, fillColor: '#1F2A44', fillOpacity: 1, className: 'rm-home-dot' });
-  if (!kids) homeDot.bindTooltip(tip('自宅（入力した場所）'));
+  if (!kids) homeDot.bindTooltip(tip('自宅（計算に使った場所）'));
   homeDot.addTo(map);
   const homeLabel = L.marker([o.home.lat, o.home.lon], {
     pane: 'home', interactive: false, keyboard: false,
@@ -293,8 +299,49 @@ export function createRiskMap(node: HTMLElement, o: RiskMapOptions): RiskMapHand
   };
   refresh();
 
+  // ---- ピンを動かす: 十字は地図の中央に固定（pointer-events: none）。地図をパンして合わせる ----
+  let pick: { center: L.LatLng; zoom: number; cross: HTMLElement; touch: L.MapOptions['touchZoom']; dbl: L.MapOptions['doubleClickZoom'] } | null = null;
+  const crosshair = (): HTMLElement => {
+    const c = el('div', { class: 'rm-crosshair', id: 'pin-crosshair', 'aria-hidden': 'true' });
+    c.innerHTML = '<svg width="72" height="72" viewBox="0 0 72 72" aria-hidden="true">' +
+      '<g stroke="#FFFFFF" stroke-width="9" stroke-linecap="round"><path d="M36 4 V26 M36 46 V68 M4 36 H26 M46 36 H68"></path></g>' +
+      '<g stroke="#C2261B" stroke-width="4.5" stroke-linecap="round"><path d="M36 4 V26 M36 46 V68 M4 36 H26 M46 36 H68"></path></g>' +
+      '<circle cx="36" cy="36" r="5" fill="#C2261B" stroke="#FFFFFF" stroke-width="2.5"></circle></svg>';
+    c.append(el('span', { class: 'rm-crosshair-label' }, 'ここを調べる'));
+    return c;
+  };
+  const opts = map.options;
+
   return {
     map,
+    startPick() {
+      if (pick) return;
+      pick = { center: map.getCenter(), zoom: map.getZoom(), cross: crosshair(), touch: opts.touchZoom, dbl: opts.doubleClickZoom };
+      // ピンチ・ダブルタップの拡大は十字（中央）を中心に
+      opts.touchZoom = 'center';
+      opts.doubleClickZoom = 'center';
+      node.classList.add('rm-picking');
+      node.append(pick.cross);
+      map.setView([o.home.lat, o.home.lon], Math.max(map.getZoom(), 15), { animate: false });
+    },
+    pickCenter() {
+      // 十字が自宅の印から1画素以内なら、自宅の地点そのもの（地図の中心は画素で丸められるため）
+      const hp = map.latLngToContainerPoint([o.home.lat, o.home.lon]);
+      const half = map.getSize().divideBy(2);
+      if (hp.distanceTo(half) < 1.5) return { ...o.home };
+      const c = map.getCenter();
+      return { lat: c.lat, lon: L.Util.wrapNum(c.lng, [-180, 180], true) };
+    },
+    endPick(keepView = false) {
+      if (!pick) return;
+      const p = pick;
+      pick = null;
+      opts.touchZoom = p.touch;
+      opts.doubleClickZoom = p.dbl;
+      node.classList.remove('rm-picking');
+      p.cross.remove();
+      if (!keepView) map.setView(p.center, p.zoom, { animate: false });
+    },
     highlightShelter(index) {
       quakePins.forEach((p, i) => p?.getElement()?.classList.toggle('selected', i === index));
       const s = o.quakeShelters[index];

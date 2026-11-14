@@ -38,6 +38,10 @@ export type ResultData = {
   kids?: boolean;
   /** 避難場所のデータを端末に保存する欄（避難場所の下に出す） */
   offlinePanel?: () => HTMLElement | null;
+  /** ピンを動かして調べ直した結果のとき: 「住所の位置にもどす」の文言（locationNote は動かした旨の文） */
+  moved?: { reset: string } | null;
+  /** 結果を出したあと、どこを見せるか（既定は結果の先頭。ピンを動かしたあとは地図） */
+  focus?: 'top' | 'map';
 };
 
 export type ResultHooks = {
@@ -49,6 +53,10 @@ export type ResultHooks = {
   onShown(result: ScenarioResult): void;
   /** こどもモードの「おとなの がめんで ちずを みる」 */
   onAdult?(): void;
+  /** 地図の「ここで調べ直す」（無ければ「ピンを動かす」を出さない） */
+  onMove?(pos: LatLon): void;
+  /** 「住所の位置にもどす」 */
+  onReset?(): void;
 };
 
 export type ResultHandle = {
@@ -56,6 +64,14 @@ export type ResultHandle = {
   showResult(result: ScenarioResult): void;
   /** こども / おとな を切り替える（計算しなおさない。開いていた再生は、切り替えた画面で開きなおす） */
   setKids(kids: boolean): void;
+  /** いま選んでいるタブ */
+  scenario(): Scenario;
+  /** 調べ直しを始めた（開いている再生を閉じる。古い地点のアニメを残さない） */
+  beginMove(): void;
+  /** 調べ直しに失敗した（結果は元の地点のまま） */
+  moveFailed(message: string): void;
+  /** 結果を作り直す前に呼ぶ（再生を止め、地図を片付ける） */
+  dispose(): void;
 };
 
 export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHooks): ResultHandle {
@@ -140,7 +156,11 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
     home: d.pos, meshes: withTsunami(curRates), tsunamiShelters: listOf('tsunami'), quakeShelters: mapShelters,
     homeKind: d.tsunami.kind, outside, homeRate: curHomeRate,
   });
-  const risk = adultRiskPanel(riskInput());
+  const doReset = (): void => hooks.onReset?.();
+  const risk = adultRiskPanel({
+    ...riskInput(),
+    move: hooks.onMove ? { onMove: (p) => hooks.onMove!(p), moved: d.moved ? { note: d.locationNote, reset: d.moved.reset, onReset: doReset } : null } : undefined,
+  });
   areaSection.append(risk.node);
   let kidRisk: RiskPanel | null = null;
 
@@ -162,6 +182,7 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
     el('section', { class: 'card disclaimer', id: 'result-disclaimer' }, el('strong', {}, DISCLAIMER)),
     el('p', { class: 'case', id: 'case-line' }, '想定ケース：', caseName, d.municipality ? `　／　${d.municipality}` : null),
     el('p', { class: 'case', id: 'location-note' }, d.locationNote),
+    ...(d.moved ? [resetButton(d.moved.reset, 'pin-reset', doReset)] : []),
   ];
   const adultBottom = [
     ...(evacSection ? [evacSection] : []),
@@ -219,7 +240,10 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
   setArea(d.result.area);
   syncTabs();
   showMode();
-  root.scrollIntoView({ behavior: 'auto', block: 'start' });
+  if (d.focus === 'map' && !kids) {
+    risk.node.scrollIntoView({ behavior: 'auto', block: 'start' });
+    risk.focusMove();
+  } else root.scrollIntoView({ behavior: 'auto', block: 'start' });
   hooks.onShown(d.result);
 
   return {
@@ -250,9 +274,33 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
       setHome(cur.sc, cur.h);
       showMode();
       if (!kids) risk.refresh(); else kidRisk?.refresh();
+      if (kids) risk.cancelPick();
       if (wasOpen) (kids ? kidLauncher : launcher)?.open();
     },
+    scenario: () => selected,
+    beginMove() {
+      launcher?.destroy();
+      kidLauncher?.destroy();
+      risk.setBusy(true);
+      panel.setAttribute('aria-busy', 'true');
+    },
+    moveFailed(message) {
+      panel.setAttribute('aria-busy', 'false');
+      risk.setBusy(false, message);
+    },
+    dispose() {
+      launcher?.destroy();
+      kidLauncher?.destroy();
+      risk.remove();
+      kidRisk?.remove();
+    },
   };
+}
+
+function resetButton(label: string, id: string, onClick: () => void): HTMLElement {
+  const b = el('button', { type: 'button', class: 'secondary pin-reset', id }, label);
+  b.addEventListener('click', onClick);
+  return b;
 }
 
 const portalLink = () => el('a', { href: HAZARD_PORTAL.url, target: '_blank', rel: 'noopener noreferrer', class: 'btn-link' }, HAZARD_PORTAL.label);

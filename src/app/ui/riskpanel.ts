@@ -8,6 +8,7 @@ import {
   type HomeKind, type HomeQuadrant, type RiskMode,
 } from '../riskmap.ts';
 import { KIDS_MAP_TEXT } from '../kids.ts';
+import { MOVE_TEXT } from '../movepin.ts';
 import { el } from './dom.ts';
 import { createRiskMap, shelterSwatch, swatchSvg, tsunamiCaption, tsunamiLegendElement, type MeshRate, type RiskMapHandle } from './map.ts';
 
@@ -24,6 +25,12 @@ export type RiskPanelInput = {
   homeRate: number | null;
   /** 自宅が対応範囲外 */
   outside: boolean;
+  /** 「📍 ピンを動かす」（おとなだけ。無ければボタンを出さない） */
+  move?: {
+    onMove(pos: LatLon): void;
+    /** 動かした地点の結果のとき: 動かした旨の文と「住所の位置にもどす」 */
+    moved: { note: string; reset: string; onReset(): void } | null;
+  };
 };
 
 export type RiskPanel = {
@@ -37,7 +44,15 @@ export type RiskPanel = {
   /** 表示した（大きさが変わった）あとに呼ぶ */
   refresh(): void;
   remove(): void;
+  /** 「ピンを動かす」の途中ならやめる（地図を元の表示に） */
+  cancelPick(): void;
+  /** 調べ直しの計算中の表示。on=false で終わり（message があれば失敗の文を出す） */
+  setBusy(on: boolean, message?: string): void;
+  /** 調べ直したあと、キーボードの位置を「ピンを動かす」に */
+  focusMove(): void;
 };
+
+const NOOP_MOVE = { cancelPick() { /* なし */ }, setBusy() { /* なし */ }, focusMove() { /* なし */ } };
 
 const QUAD_TONE: Record<string, { border: string; title: string }> = {
   both: { border: '#6E5BB0', title: '#4A3A8C' },
@@ -115,10 +130,49 @@ export function adultRiskPanel(i: RiskPanelInput): RiskPanel {
     el('li', { class: 'rm-not-safe' }, '灰色も安全という意味ではありません。想定を超える揺れや津波もあり得ます'));
   // 半割れ・時間差のタブでは、津波のマスも最大クラスの想定であることを書く
   const scenarioNote = el('p', { class: 'note rm-scenario-note', id: 'risk-scenario-note', hidden: true }, '津波のマス（波の模様）と矢印は、どのタブでも最大クラスの想定です（自宅の結果の津波の注記と同じ）');
+  // ---- 📍 ピンを動かす（十字を地図の中央に固定し、地図を動かして合わせる。ピンは直接ドラッグしない）----
+  const mv = i.move;
+  let picking = false;
+  const moveBtn = mv ? el('button', { type: 'button', class: 'secondary rm-move', id: 'pin-move' }, el('span', { 'aria-hidden': 'true' }, '📍 '), MOVE_TEXT.start) : null;
+  const movedRow = mv?.moved ? el('div', { class: 'rm-moved', id: 'risk-moved' }, el('p', {}, mv.moved.note), (() => {
+    const b = el('button', { type: 'button', class: 'secondary pin-reset', id: 'pin-reset-map' }, mv.moved.reset);
+    b.addEventListener('click', () => mv.moved!.onReset());
+    return b;
+  })()) : null;
+  const pinStatus = el('p', { class: 'rm-pick-status', id: 'pin-status', role: 'status', 'aria-live': 'polite', hidden: true });
+  const confirmBtn = el('button', { type: 'button', class: 'rm-pick-ok', id: 'pin-confirm' }, MOVE_TEXT.confirm);
+  const cancelBtn = el('button', { type: 'button', class: 'secondary rm-pick-cancel', id: 'pin-cancel' }, MOVE_TEXT.cancel);
+  const pickBar = el('div', { class: 'rm-pick-bar', id: 'pin-bar', hidden: true }, confirmBtn, cancelBtn);
+  const status = (text: string | null, cls = ''): void => {
+    pinStatus.hidden = text === null;
+    pinStatus.className = `rm-pick-status${cls}`;
+    pinStatus.textContent = text ?? '';
+  };
+  const setPicking = (on: boolean, keepView = false): void => {
+    if (on === picking) return;
+    picking = on;
+    if (on) handle?.startPick(); else handle?.endPick(keepView);
+    node.classList.toggle('rm-picking', on);
+    pickBar.hidden = !on;
+    if (moveBtn) moveBtn.hidden = on;
+    if (movedRow) movedRow.hidden = on;
+    status(on ? MOVE_TEXT.guide : null, on ? ' rm-pick-guide' : '');
+  };
+  moveBtn?.addEventListener('click', () => { setPicking(true); confirmBtn.focus({ preventScroll: true }); });
+  cancelBtn.addEventListener('click', () => { setPicking(false); moveBtn?.focus({ preventScroll: true }); });
+  confirmBtn.addEventListener('click', () => {
+    if (!handle || !mv) return;
+    const c = handle.pickCenter();
+    setPicking(false, true);
+    mv.onMove(c);
+  });
+  const moveRow = mv ? el('div', { class: 'rm-move-row' }, moveBtn!, ...(movedRow ? [movedRow] : [])) : null;
+
   const node = el('div', { class: 'risk-panel', id: 'risk-panel' },
     el('h3', { class: 'rm-title' }, '周辺1kmの危険マップ'),
     el('p', { class: 'hint' }, '250mマスごとの推計。緑の大きな印が津波の避難場所（高い所）です。'),
-    toggle, scenarioNote, el('div', { class: 'rm-map-card' }, mapNode, legendSlot, escapeSlot), homeSlot, notes, tsunamiLegendSlot, tsunamiCaption());
+    toggle, scenarioNote, ...(moveRow ? [moveRow] : []), pinStatus,
+    el('div', { class: 'rm-map-card' }, mapNode, ...(mv ? [pickBar] : []), legendSlot, escapeSlot), homeSlot, notes, tsunamiLegendSlot, tsunamiCaption());
   let handle: RiskMapHandle | null = null;
 
   const draw = (): void => {
@@ -162,7 +216,14 @@ export function adultRiskPanel(i: RiskPanelInput): RiskPanel {
     setHome(rate, l2) { homeRate = rate; scenarioNote.hidden = l2; draw(); },
     highlightShelter(index) { handle?.highlightShelter(index); },
     refresh() { handle?.refresh(); },
-    remove() { handle?.remove(); handle = null; },
+    remove() { setPicking(false); handle?.remove(); handle = null; },
+    cancelPick() { setPicking(false); },
+    setBusy(on, message) {
+      setPicking(false, true);
+      if (moveBtn) moveBtn.disabled = on;
+      status(on ? MOVE_TEXT.busy : message ?? null, on ? ' rm-pick-busy' : message ? ' rm-pick-error' : '');
+    },
+    focusMove() { moveBtn?.focus({ preventScroll: true }); },
   };
 }
 
@@ -197,5 +258,7 @@ export function kidsRiskPanel(i: RiskPanelInput): RiskPanel {
     highlightShelter() { /* こどもは経路の選択なし */ },
     refresh() { handle?.refresh(); },
     remove() { handle?.remove(); handle = null; },
+    // こどもモードでは「ピンを動かす」を出さない（結果は反映する）
+    ...NOOP_MOVE,
   };
 }

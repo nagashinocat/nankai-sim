@@ -8,7 +8,7 @@ import { homeArrival } from './arrival.ts';
 import { TSUNAMI_TILE_ZOOM, canvasPixelReader, tsunamiAround, tsunamiAt } from './tsunami-tile.ts';
 import { createDataSource, type Manifest } from './data.ts';
 import { searchAddress } from './geocode.ts';
-import { computeScenario, createScenarioRunner, type Scenario, type ScenarioContext, type ScenarioResult } from './scenario.ts';
+import { computeScenario, createLatestOnly, createScenarioRunner, type Scenario, type ScenarioContext, type ScenarioResult } from './scenario.ts';
 import { evacuationViewModel, homeTsunamiVM, type EvacVM, locationNote, type LocationSource } from './viewmodel.ts';
 import { DISCLAIMER, DISCLAIMER_DETAIL, clear, el } from './ui/dom.ts';
 import { clearLast, loadLast, saveLast, savedShelters } from './storage.ts';
@@ -29,6 +29,7 @@ import { renderNear, type NearHandle } from './ui/near.ts';
 import { headingIcon } from './ui/visuals.ts';
 import { renderOfflinePanel } from './ui/offline-panel.ts';
 import { savedIndex } from './offline.ts';
+import { MOVE_TEXT, type MoveState, isMoved, movedNote, resetLabel, samePlace } from './movepin.ts';
 
 useFragilityTable(fragility as never);
 
@@ -165,12 +166,10 @@ let practiceHome: PracticeHome | null = null;
 /** 家族の決まりで選べる近くの避難場所（名前と徒歩の目安だけ。座標・住所は持たない）。結果が無ければ null。 */
 let familyShelters: FamilyShelters | null = null;
 
-async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise<void> {
-  runner.invalidate(); // 前の場所のタブの計算が、あとから新しい結果に混ざらないように
-  practiceHome = null;
-  resultHandle = null;
-  familyShelters = null;
-  clear(resultRoot); // 読み込みに失敗したとき、前の場所の結果を残さない
+/** 1か所ぶんの計算に使う値（画面に出す前。副作用なし）。 */
+type Prepared = Awaited<ReturnType<typeof prepare>>;
+
+async function prepare(pos: LatLon, home: HomeInput) {
   const mesh = latLonToMesh250(pos);
   await ds.hazardCell('L2', mesh); // 先に読み込みの失敗を出す（computeScenario が同じ値を使う）
   const meshes = meshesWithin(pos, 1000);
@@ -178,7 +177,7 @@ async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise
     ds.stockFor(meshes), municipalityAround(pos, mesh), ds.sheltersNear(pos, 5000),
     tsunamiAround(pos, tileReader), // 中心が浸水域外なら約50mの8方向も見る（Ruling F3）
   ]);
-    // 推測した市町名（municipality）は表示用。到達時間は自宅のマス自身の市町村だけから引く。
+  // 推測した市町名（municipality）は表示用。到達時間は自宅のマス自身の市町村だけから引く。
   const arrival = await homeArrival(ds, mesh);
   // 周辺: 各マス中心の浸水深の段階の代表値（浸水域外は0、判定できないマスは津波なし）。シナリオ間で同じ値を使い回す。
   const depths = new Map<string, Promise<number | null>>();
@@ -198,21 +197,87 @@ async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise
   const evacShelters = evac.map((e) =>
     nearestShelters(pos, shelters, { hazard: e.hazard, speedMps: WALK_SPEED.standard, limit: 5 }).map((h) => h.shelter),
   );
+  return { pos, home, municipality, homeTsunami, arrival, ctx, l2, evac, evacShelters };
+}
+
+/**
+ * 1回の「調べる」（住所・現在地・地図・ピンを動かす・もどす）ごとの世代。新しい調べが始まったら、
+ * 古い計算の結果（と失敗）は捨てる（あとから画面を上書きしない）。
+ */
+const runs = createLatestOnly();
+/** ピンを動かす前の地点（住所の位置など）と、いま計算している地点。メモリだけ（保存・URL・共有文に入れない）。 */
+let moveState: MoveState | null = null;
+
+/** 画面の前の結果を片付ける（タブの計算・練習モード・家族の決まりの値も、前の場所のものを残さない）。 */
+function dropResult(): void {
+  runner.invalidate(); // 前の場所のタブの計算が、あとから新しい結果に混ざらないように
+  resultHandle?.dispose();
+  resultHandle = null;
+  practiceHome = null;
+  familyShelters = null;
+  resultRoot.inert = false;
+  resultRoot.removeAttribute('aria-busy');
+}
+
+/** 住所・現在地・地図で選んだ所から新しく調べる。ピンを動かした状態はリセットする。 */
+async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise<void> {
+  moveState = null;
+  dropResult();
+  clear(resultRoot); // 読み込みに失敗したとき、前の場所の結果を残さない
+  const p = await runs.run(() => prepare(pos, home));
+  if (!p) return; // あとから始めた調べに追い越された
+  moveState = { origin: pos, originWhere: where, home, current: pos };
+  render(p, moveState, 'L2', 'top');
+}
+
+/** 「ここで調べ直す」「住所の位置にもどす」: 建物の入力はそのまま、地点だけ変えて全体を計算し直す。 */
+async function rerun(pos: LatLon): Promise<void> {
+  const ms = moveState;
+  const handle = resultHandle;
+  if (!ms || !handle) return;
+  const scenario = handle.scenario(); // 選んでいたタブ（地図の 揺れ/津波/両方 は riskpanel が覚えている）
+  // 計算中は前の結果を残したまま触れないようにする（タブ・ボタンを押しても古い場所の計算を始めない）。
+  // 進行中のタブの計算は止めない（失敗して元の地点のままになったとき、そのタブが「読み込んでいます」で止まらないように）。
+  // 新しい結果を出す前に dropResult で無効にするので、あとから新しい結果を上書きしない。
+  handle.beginMove();
+  resultRoot.inert = true;
+  resultRoot.setAttribute('aria-busy', 'true');
+  let p: Prepared | null;
+  try {
+    p = await runs.run(() => prepare(pos, ms.home));
+  } catch (e) {
+    // 最新の調べの失敗だけここに来る。結果は元の地点のまま
+    if (resultHandle === handle) {
+      resultRoot.inert = false;
+      resultRoot.removeAttribute('aria-busy');
+      handle.moveFailed(`${MOVE_TEXT.failed}（${(e as Error).message}）`);
+    }
+    return;
+  }
+  if (!p || moveState !== ms || resultHandle !== handle) return; // 追い越された・住所を入れ直した
+  const next: MoveState = { ...ms, current: pos };
+  moveState = next;
+  dropResult();
+  render(p, next, scenario, 'map');
+}
+
+function render(p: Prepared, ms: MoveState, scenario: Scenario, focus: 'top' | 'map'): void {
+  const { pos, home, municipality, homeTsunami, arrival, ctx, l2, evac, evacShelters } = p;
   // タブの結果は場所ごとに覚えておく（読み込めなかったものは覚えず、「もう一度読み込む」で再試行）
   const cache = new Map<Scenario, ScenarioResult>([['L2', l2]]);
   runner.invalidate();
-  const show = async (scenario: Scenario): Promise<void> => {
-    const hit = cache.get(scenario);
+  const show = async (sc: Scenario): Promise<void> => {
+    const hit = cache.get(sc);
     if (hit) { runner.invalidate(); handle.showResult(hit); return; }
-    handle.showLoading(scenario);
+    handle.showLoading(sc);
     let r: ScenarioResult | null;
     try {
-      r = await runner.request(ctx, scenario);
+      r = await runner.request(ctx, sc);
     } catch {
-      r = { scenario, home: { status: 'error' }, area: { status: 'unavailable' }, meshRates: ctx.meshes.map((m) => ({ mesh: m, rate: null })) };
+      r = { scenario: sc, home: { status: 'error' }, area: { status: 'unavailable' }, meshRates: ctx.meshes.map((m) => ({ mesh: m, rate: null })) };
     }
     if (!r) return; // 後から選ばれたタブ・別の場所の要求に追い越された
-    if (r.home.status !== 'error') cache.set(scenario, r);
+    if (r.home.status !== 'error') cache.set(sc, r);
     handle.showResult(r);
   };
   // 練習モードの一言は、結果を画面に出す直前にだけ決める（途中で失敗したときは前の結果の値を残さない）
@@ -223,20 +288,26 @@ async function run(pos: LatLon, home: HomeInput, where: LocationSource): Promise
   };
   const walkList = (h: 'earthquake' | 'tsunami') => (evac.find((e) => e.hazard === h)?.items ?? []).slice(0, 5).map((i) => ({ name: i.name, walk: i.walkStandard }));
   familyShelters = { tsunami: walkList('tsunami'), quake: walkList('earthquake') };
+  const moved = isMoved(ms);
   let handle: ReturnType<typeof renderResult>;
   try {
   handle = renderResult(resultRoot, {
-    pos, municipality, result: l2, evac, evacShelters, locationNote: locationNote(where), tsunami: homeTsunamiVM(homeTsunami, arrival), kids,
-    offlinePanel,
+    pos, municipality, result: l2, evac, evacShelters,
+    locationNote: moved ? movedNote(ms.origin, ms.current, ms.originWhere) : locationNote(ms.originWhere),
+    tsunami: tsunamiVM, kids, offlinePanel,
+    moved: moved ? { reset: resetLabel(ms.originWhere) } : null,
+    focus,
   }, {
     onSelect: (s) => void show(s),
     onRetry: (s) => void show(s),
     onShown: (r) => onResultShown(home, municipality, evac, r),
     onAdult: () => setKids(false),
+    onMove: (to) => { if (!samePlace(to, ms.current)) void rerun(to); }, // 十字を動かしていなければ何もしない
+    onReset: () => void rerun(ms.origin),
   });
   resultHandle = handle;
   } catch (e) { practiceHome = null; familyShelters = null; throw e; }
-  void handle;
+  if (scenario !== 'L2') void show(scenario);
 }
 
 const view = renderInput(inputRoot, {
