@@ -262,14 +262,14 @@ export function createRiskMap(node: HTMLElement, o: RiskMapOptions): RiskMapHand
     map.invalidateSize();
     const size = map.getSize();
     if (size.x === 0 || size.y === 0) return;
-    // 逃げる方向がいちばん大事: 自宅と逃げる先がどちらも入り、矢印が読める長さになる縮尺に合わせる（最初の1回だけ。
-    // 遠ければ縮め、近ければ 17 まで拡大する。1km の範囲は縮小すれば見られる）
+    // 最初の1回だけ: 周辺1kmと逃げる先がどちらも入る縮尺に合わせる
     if (!fitted && o.escape) {
       fitted = true;
       const t = L.latLng(o.escape.shelter.pos.lat, o.escape.shelter.pos.lon);
-      const pad = Math.min(72, Math.floor(Math.min(size.x, size.y) / 4));
       // 下は避難場所の名前のラベルと出典の分を空ける
-      map.fitBounds(L.latLngBounds([L.latLng(o.home.lat, o.home.lon), t]), { paddingTopLeft: [pad, pad], paddingBottomRight: [pad, pad + 40], maxZoom: 17, animate: false });
+      // 周辺1km（円）全体が見えることを優先し、逃げる先が円の外なら広げる（2026-11-14 本番確認: 近いと拡大しすぎてマスが2〜3個しか見えなかった）
+      const b = L.latLng(o.home.lat, o.home.lon).toBounds(2000).extend(t);
+      map.fitBounds(b, { paddingTopLeft: [8, 8], paddingBottomRight: [8, 28], maxZoom: 16, animate: false });
     }
     avoidHome();
     if (map.hasLayer(escapeLayer)) drawEscape();

@@ -120,7 +120,8 @@ test('やることマップ: 津波の避難場所の大きな印と名前のラ
       // 地図の枠の中（見えている）印だけ
       if (r.width === 0 || cx < box.left || cx > box.right || cy < box.top || cy > box.bottom || cy < 0 || cy > innerHeight) continue;
       const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-      out.push(top && m.contains(top) ? 'ok' : `${top?.tagName}.${top?.getAttribute('class')}`);
+      // 上にあるのが自分か、ほかの避難場所の印なら良い（広い縮尺では近い避難場所どうしが重なることがある）
+      out.push(top && (m.contains(top) || top.closest('[class*="rm-shelter"]')) ? 'ok' : `${top?.tagName}.${top?.getAttribute('class')}`);
     }
     return { out, size: [...document.querySelectorAll<HTMLElement>('#result-map .rm-shelter-tsunami')].map((m) => Math.round(m.getBoundingClientRect().width)) };
   });
