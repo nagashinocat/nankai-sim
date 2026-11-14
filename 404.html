@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ja">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ページが見つかりません</title></head>
+<body style="font-family: system-ui, sans-serif; padding: 24px; line-height: 1.7">
+<h1 style="font-size: 20px">ページが見つかりません</h1>
+<p><a id="home" href="/">南海トラフ 住まいの被害シミュレーターへ</a></p>
+<script>
+  // GitHub Pages のプロジェクトサイト（https://<user>.github.io/<repo>/）では最初のパスがアプリの場所
+  if (location.hostname.endsWith('github.io')) {
+    var seg = location.pathname.split('/')[1];
+    if (seg) document.getElementById('home').href = '/' + seg + '/';
+  }
+</script>
+</body>
+</html>
