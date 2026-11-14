@@ -7,10 +7,12 @@ import {
 } from '../text.ts';
 import { DISCLAIMER, el } from './dom.ts';
 import { shelterListNodes, tsunamiNotice } from './shelters.ts';
-import { createResultMap, legendElement, tsunamiCaption, tsunamiLegendElement, type MeshRate } from './map.ts';
+import type { MeshRate } from './map.ts';
+import { adultRiskPanel, kidsRiskPanel, type RiskPanel } from './riskpanel.ts';
 import { renderActions, updateShare } from './actions.ts';
 import { damageNodes } from './stages.ts';
 import { headingIcon, summaryCard, tsunamiPicture } from './visuals.ts';
+import { rangeNumbers } from '../visuals.ts';
 import { PRACTICE_ENTRY } from '../practice/scenes.ts';
 import { FAMILY_LINK_RESULT } from './family.ts';
 import { playerLauncher, type Launcher } from './player.ts';
@@ -104,8 +106,6 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
   const homeSection = el('section', { class: 'card', id: 'home-result' });
   const areaText = el('div', {});
   const areaSection = el('section', { class: 'card' }, el('h2', {}, headingIcon('🗺️'), '周辺1km（推計）'), areaText);
-  const mapNode = el('div', { id: 'result-map', class: 'map' });
-  areaSection.append(el('p', { class: 'hint' }, '地図の色は、250mマスごとの全壊率の推計です。'), mapNode, legendElement(), tsunamiLegendElement(), tsunamiCaption());
   // 「ひと目でわかる」はタブの説明・注意の下（タブを替えると作り直す）
   const summarySlot = el('div', {});
   const adultPanel = el('div', { id: 'adult-panel' }, explain, noticeSlot, summarySlot, homeSection, areaSection);
@@ -124,7 +124,25 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
   const evacSection = outside ? null : el('section', { class: 'card', id: 'evac' }, el('h2', {}, headingIcon('🏃'), '避難できる場所'), ...shelterListNodes(d.evac, mapFor),
     el('a', { href: '#near', class: 'btn-link near-entry', id: 'near-entry-result' }, headingIcon('📍'), NEAR_TEXT.entry));
   const panel0 = outside ? null : d.offlinePanel?.() ?? null;
-  const mapShelters = outside ? [] : d.evacShelters[0] ?? [];
+  const listOf = (hz: 'earthquake' | 'tsunami'): Shelter[] => {
+    const i = d.evac.findIndex((e) => e.hazard === hz);
+    return outside || i < 0 ? [] : d.evacShelters[i] ?? [];
+  };
+  const mapShelters = listOf('earthquake');
+  // 津波の深さは場所で決まる（どのタブでも同じ）。読み込み中・読み込めなかったタブでも最大クラスの値を使う
+  const l2Tsunami = new Map(d.result.meshRates.map((m) => [m.mesh, m.tsunami ?? null]));
+  const withTsunami = (list: MeshRate[]): MeshRate[] => list.map((m) => ({ ...m, tsunami: m.tsunami ?? l2Tsunami.get(m.mesh) ?? null }));
+  let curRates: MeshRate[] = d.result.meshRates;
+  // 「自宅はここ」は入力した家の推計（自宅の結果の全壊率の代表値）で決める（マスの平均ではない）
+  const homeRateOf = (h: ScenarioHome | 'loading'): number | null => (h !== 'loading' && h.status === 'ok' ? rangeNumbers(h.collapse)?.central ?? null : null);
+  let curHomeRate = homeRateOf(d.result.home);
+  const riskInput = () => ({
+    home: d.pos, meshes: withTsunami(curRates), tsunamiShelters: listOf('tsunami'), quakeShelters: mapShelters,
+    homeKind: d.tsunami.kind, outside, homeRate: curHomeRate,
+  });
+  const risk = adultRiskPanel(riskInput());
+  areaSection.append(risk.node);
+  let kidRisk: RiskPanel | null = null;
 
   const shareOf = (r: ScenarioResult): string | null => {
     const h = r.home;
@@ -135,7 +153,7 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
     shelters: mapShelters,
     municipality: d.municipality,
     shareText: shareOf(d.result),
-    onSelectShelter: (i) => handle.highlightShelter(i),
+    onSelectShelter: (i) => risk.highlightShelter(i),
   });
 
   const caseName = el('strong', {}, CASE_NAME);
@@ -152,9 +170,9 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
     el('a', { href: '#practice', class: 'btn-link', id: 'practice-entry' }, PRACTICE_ENTRY),
   ];
   root.append(...adultTop, intro, tablist, panel, ...adultBottom);
-  const handle = createResultMap(mapNode, d.pos, d.result.meshRates, mapShelters);
-  handle.highlightShelter(0);
-  handle.map.invalidateSize();
+  risk.mount();
+  risk.highlightShelter(0);
+  risk.refresh();
 
   // 「▶ 地震から津波までを再生」。タブを替えたら止めて作り直す（そのタブの値で再生する）
   let launcher: Launcher | null = null;
@@ -164,7 +182,10 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
     kidLauncher?.destroy();
     kidLauncher = !kids || h === 'loading' || h.status === 'outside' ? null
       : playerLauncher(() => ({ scenario: sc, home: h, tsunami: d.tsunami, evac: d.evac }), { kids: true });
-    kidsView.replaceChildren(...(kids ? kidsResultNodes({ home: h, scenario: sc, tsunami: d.tsunami, player: kidLauncher?.node ?? null, onAdult: () => hooks.onAdult?.(), onRetry: () => hooks.onRetry(sc) }) : []));
+    kidRisk?.remove();
+    kidRisk = kids && !(h !== 'loading' && h.status === 'outside') ? kidsRiskPanel(riskInput()) : null;
+    kidsView.replaceChildren(...(kids ? kidsResultNodes({ home: h, scenario: sc, tsunami: d.tsunami, player: kidLauncher?.node ?? null, riskMap: kidRisk?.node ?? null, onAdult: () => hooks.onAdult?.(), onRetry: () => hooks.onRetry(sc) }) : []));
+    kidRisk?.mount();
   };
   const showMode = (): void => {
     for (const n of [...adultTop, ...adultBottom, adultPanel]) n.hidden = kids;
@@ -174,6 +195,8 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
   };
   const setHome = (sc: Scenario, h: ScenarioHome | 'loading'): void => {
     cur = { sc, h };
+    curHomeRate = homeRateOf(h);
+    risk.setHome(curHomeRate, sc === 'L2');
     drawKids(sc, h);
     launcher?.destroy();
     launcher = h === 'loading' || h.status === 'outside' ? null
@@ -205,16 +228,18 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
       syncTabs();
       setHome(sc, 'loading');
       setArea('loading');
-      handle.setMeshRates(greyed());
+      curRates = greyed();
+      risk.setMeshRates(withTsunami(curRates));
     },
     showResult(r) {
       selected = r.scenario;
       syncTabs();
+      curRates = r.meshRates;
       setHome(r.scenario, r.home);
       // 想定のデータが無いタブで周辺が出せないのは、建物データのせいではない（最大クラスでは出せているとき）
       const noScenarioData = r.scenario !== 'L2' && r.area.status === 'nostock' && d.result.area.status !== 'nostock';
       setArea(r.home.status === 'error' ? 'error' : noScenarioData ? 'nodata' : r.area);
-      handle.setMeshRates(r.meshRates);
+      risk.setMeshRates(withTsunami(r.meshRates));
       updateShare(actions, shareOf(r));
       hooks.onShown(r);
     },
@@ -224,7 +249,7 @@ export function renderResult(root: HTMLElement, d: ResultData, hooks: ResultHook
       kids = on;
       setHome(cur.sc, cur.h);
       showMode();
-      if (!kids) handle.map.invalidateSize();
+      if (!kids) risk.refresh(); else kidRisk?.refresh();
       if (wasOpen) (kids ? kidLauncher : launcher)?.open();
     },
   };

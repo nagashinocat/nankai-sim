@@ -220,14 +220,19 @@ test('津波: 浸水深1〜3mの色 → 浸水深・到達時間・注記・避�
   await expect(page.getByText('この結果に津波の被害は含まれていません')).toHaveCount(0);
   // 到達15分 → 避難場所ごとの判定（3つの文言のどれか）が津波の避難場所リストに出る
   await expect(page.locator('#evac ol.shelters .reach').first()).toHaveText(/すぐ避難を始めれば間に合う可能性|ぎりぎり。より近い高い場所も考えて|間に合わないおそれ。近くの高い建物や高台へ/);
-  // 地図の凡例（8色）と出典表示
+  // 地図の凡例（8色）と出典表示。浸水深の8色と地理院の津波タイルは「津波」の表示のときだけ
+  await expect(page.locator('.tsunami-legend li')).toHaveCount(0);
+  await expect(page.locator('#result-map img[src*="04_tsunami_newlegend_data"]')).toHaveCount(0);
+  await page.locator('#risk-mode-tsunami').click();
   await expect(page.locator('.tsunami-legend li')).toHaveCount(8);
   await expect(page.locator('.tsunami-legend li').first()).toContainText('津波 0.3m未満');
   await expect(page.locator('.leaflet-control-attribution')).toContainText('ハザードマップポータルサイト');
   await expect(page.locator('.leaflet-control-attribution')).not.toContainText('津波浸水想定');
   await expect(page.locator('.tsunami-attribution')).toContainText('津波浸水想定：各都道府県');
-  // 津波タイルは全壊率の四角より上の別ペイン
-  expect(await page.locator('.leaflet-tsunami-pane').evaluate((e) => Number(getComputedStyle(e).zIndex))).toBeGreaterThan(400);
+  // 津波タイルはマスより上・自宅の印（overlay 400）より下の別ペイン
+  const paneZ = (c: string) => page.locator(`#result-map .leaflet-${c}-pane`).evaluate((e) => Number(getComputedStyle(e).zIndex));
+  expect(await paneZ('tsunami')).toBeGreaterThan(await paneZ('mesh'));
+  expect(await paneZ('tsunami')).toBeLessThan(await paneZ('overlay'));
   expect(await page.locator('.leaflet-tsunami-pane').evaluate((e) => getComputedStyle(e).opacity)).toBe('1');
   await expect(page.locator('.leaflet-tsunami-pane .leaflet-layer').first()).toHaveCSS('opacity', '0.5');
   await expect(page.locator('#result-map img[src*="04_tsunami_newlegend_data"]').first()).toBeAttached();
@@ -480,7 +485,8 @@ test('タブ: 周辺の推計と地図の色がタブに合わせて変わる', 
   test.skip(!hasRealData, 'public/data に実データが無いためスキップ');
   await searchKomono(page);
   const area = page.locator('section.card', { has: page.getByRole('heading', { name: '周辺1km（推計）' }) });
-  const fills = () => page.locator('#result-map path.leaflet-interactive').evaluateAll((ps) => ps.map((p) => p.getAttribute('fill')).join(','));
+  // マスの色は「やること」の段階なので、タブで段階が変わらないこともある。マスごとの推計値（data-rate）で比べる
+  const fills = () => page.locator('#result-map path.rm-cell').evaluateAll((ps) => ps.map((p) => p.getAttribute('data-rate')).join(','));
   const l2Area = await area.innerText();
   const l2Fills = await fills();
   await tab(page, '時間差（東→西）').click();
@@ -637,7 +643,7 @@ test('タブ: タブを切り替えて戻しても、自宅の印が全壊率の
   // 自宅の印の中心にある要素は、自宅の印（overlay ペインの円）
   await page.locator('#result-map').scrollIntoViewIfNeeded();
   const hit = await page.evaluate(() => {
-    const marker = [...document.querySelectorAll('#result-map .leaflet-overlay-pane path')].find((p) => p.getAttribute('fill') === '#1f4e79' && p.getAttribute('fill-opacity') === '1')!;
+    const marker = [...document.querySelectorAll('#result-map .leaflet-overlay-pane path')].find((p) => p.getAttribute('fill') === '#1F2A44' && p.getAttribute('fill-opacity') === '1')!;
     const r = marker.getBoundingClientRect();
     const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
     return top === marker ? 'ok' : `${top?.tagName}.${top?.getAttribute('class')} fill=${top?.getAttribute('fill')}`;

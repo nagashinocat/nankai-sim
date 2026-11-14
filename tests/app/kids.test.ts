@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  KIDS_KEY, arrivalLine, bandPhrase, depthReading, fun, houseLegend, intensityFace, intensityPhrase, intensityRuby, intensityStep,
+  KIDS_KEY, KIDS_MAP_TEXT, arrivalLine, bandPhrase, depthReading, fun, houseLegend, intensityFace, intensityPhrase, intensityRuby, intensityStep,
   kidActions, kidClock, kidReviewed, kidSceneCaption, kidShake, loadKids, saveKids, tsunamiKidText,
 } from '../../src/app/kids.ts';
 import { buildTimeline } from '../../src/app/timeline.ts';
@@ -149,4 +149,8 @@ test('loadKids / saveKids: 既定は おとな。壊れた storage でも落ち�
 test('kidReviewed', () => {
   assert.equal(kidReviewed('2026-11-12'), '2026ねん 11がつ12にち に みなおしたよ');
   assert.equal(kidReviewed(null), null);
+});
+
+test('KIDS_MAP_TEXT: きけん マップの ことばは ひらがな・カタカナだけ', () => {
+  for (const v of Object.values(KIDS_MAP_TEXT).flat()) assert.doesNotMatch(v, /[一-鿿]/, v);
 });

@@ -86,7 +86,11 @@ export async function computeScenario(ds: DataSource, ctx: ScenarioContext, scen
         scenario,
         home: homeViewModel(cell, ctx.input, ctx.homeTsunami, ctx.arrival),
         area: areaViewModel(cells, ctx.stock, ctx.meshes),
-        meshRates: ctx.meshes.map((m) => ({ mesh: m, rate: cells[m] && ctx.stock[m] ? rateOf(() => meshCollapseRate(cells[m], ctx.stock[m])) : null })),
+        meshRates: ctx.meshes.map((m) => ({
+          mesh: m,
+          rate: cells[m] && ctx.stock[m] ? rateOf(() => meshCollapseRate(cells[m], ctx.stock[m])) : null,
+          tsunami: cells[m]?.tsunamiDepth ?? null,
+        })),
       };
     }
     const [firstCell, secondCell, firstRaw, secondRaw] = await Promise.all([
@@ -102,6 +106,7 @@ export async function computeScenario(ds: DataSource, ctx: ScenarioContext, scen
       meshRates: ctx.meshes.map((m) => ({
         mesh: m,
         rate: firstRaw[m] && second[m] && ctx.stock[m] ? rateOf(() => meshLagCollapseRate(firstRaw[m], second[m], ctx.stock[m])) : null,
+        tsunami: second[m]?.tsunamiDepth ?? null,
       })),
     };
   } catch (e) {

@@ -37,7 +37,8 @@ export function solidPng(r: number, g: number, b: number, a = 255, hole?: (px: n
 }
 
 /** hole: z17 で、その地点から radiusPx 画素以内を透明（浸水域外）にする（自宅の点だけ浸水域外・周りは浸水、の確認用）。 */
-export type TsunamiStub = 'none' | 'error' | { rgb: [number, number, number]; alpha?: number; hole?: { lat: number; lon: number; radiusPx: number } };
+/** floodEastOf: その経度より西の画素を透明（浸水域外）にする（海側だけ浸水、の確認用。どのズームでも）。 */
+export type TsunamiStub = 'none' | 'error' | { rgb: [number, number, number]; alpha?: number; hole?: { lat: number; lon: number; radiusPx: number }; floodEastOf?: number };
 
 function worldPixel(lat: number, lon: number, z: number): [number, number] {
   const n = 2 ** z * 256;
@@ -57,6 +58,12 @@ export async function stubTsunami(page: Page, mode: TsunamiStub = 'none'): Promi
       const [cx, cy] = worldPixel(h.lat, h.lon, 17);
       const ox = Number(m[2]) * 256, oy = Number(m[3]) * 256;
       hole = (px, py) => Math.hypot(ox + px + 0.5 - cx, oy + py + 0.5 - cy) <= h.radiusPx;
+    }
+    if (mode.floodEastOf !== undefined && m) {
+      const z = Number(m[1]);
+      const edge = worldPixel(0, mode.floodEastOf, z)[0] - Number(m[2]) * 256;
+      const prev = hole;
+      hole = (px, py) => px + 0.5 < edge || !!prev?.(px, py);
     }
     return route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'image/png' }, body: solidPng(...mode.rgb, mode.alpha ?? 255, hole) });
   });

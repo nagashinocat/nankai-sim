@@ -50,6 +50,8 @@ test('L2: homeViewModel / areaViewModel と同じ結果。地図の色は全壊�
   assert.deepEqual(r.area, areaViewModel(cells, stock, [MESH, '5236442024']));
   assert.equal(r.meshRates.length, 2);
   assert.ok(r.meshRates.every((m) => typeof m.rate === 'number'));
+  // やることマップ用: 各マスの津波の深さ（areaTsunamiDepth の結果）
+  assert.ok(r.meshRates.every((m) => m.tsunami === 1.5));
 });
 
 test('HALF_E / HALF_W はそのケースのセルで計算する', async () => {
@@ -71,6 +73,7 @@ test('時間差: EW は 先発 HALF_E・後発 HALF_W、WE は逆。周辺・地
   assert.deepEqual(ew.area, areaLagViewModel(
     { [MESH]: cellOf(6.0), '5236442024': cellOf(5.9) }, { [MESH]: t(5.4), '5236442024': t(5.3) }, stock, [MESH, '5236442024']));
   assert.ok(ew.meshRates.every((m) => typeof m.rate === 'number'));
+  assert.ok(ew.meshRates.every((m) => m.tsunami === 1.5));
 });
 
 test('片方のケースのファイルが無い → そのシナリオだけ nodata。L2 など他は無事', async () => {

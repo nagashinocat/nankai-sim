@@ -216,6 +216,8 @@ export type KidsResultArgs = {
   tsunami: TsunamiVM;
   /** 「うごきで みて みよう」（再生できないときは null） */
   player: HTMLElement | null;
+  /** おうちの まわりの きけん マップ（出せないときは null。地図は差し込んだあとに作る） */
+  riskMap?: HTMLElement | null;
   onAdult: () => void;
   /** 読み込めなかった タブを もう いちど（おとなの「もう一度読み込む」と同じ） */
   onRetry: () => void;
@@ -236,6 +238,7 @@ export function kidsResultNodes(a: KidsResultArgs): Node[] {
   } else {
     top.push(shakeSection(a.home, a.scenario), houseSection(a.home), tsunamiSection(a.tsunami));
   }
+  if (a.riskMap) top.push(a.riskMap);
   return [
     ...top,
     actionsSection(a.tsunami, status === 'outside'),

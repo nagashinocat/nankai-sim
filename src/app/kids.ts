@@ -50,6 +50,16 @@ export const KIDS_TEXT = {
   strong: 'つよい',
 } as const;
 
+/** おうちの まわりの きけん マップ（こども）。ひらがなだけ。 */
+export const KIDS_MAP_TEXT = {
+  title: ['おうちの まわりの', 'きけん マップ'],
+  goSmall: 'ゆれが とまったら すぐ',
+  goBig: 'みどりの やじるしの ほうへ にげる',
+  noArrowSmall: 'つなみの ときは',
+  noArrowBig: 'みどりの まるの ばしょへ にげる',
+  foot: ['みちは おうちの ひとと いっしょに たしかめてね。', 'はいいろの ところも、ゆだんは しないでね。'],
+} as const;
+
 /** タブの名前（こども）。 */
 export const KIDS_TAB_LABELS: Record<Scenario, string> = {
   L2: 'いちばん おおきい じしん',
