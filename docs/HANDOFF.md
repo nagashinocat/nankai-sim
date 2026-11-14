@@ -10,7 +10,7 @@
 | 項目 | 状態 |
 |---|---|
 | アプリ本体 | master `a88230c` まで完成。テスト 単体301件・画面69件・オフライン1件がすべて通る |
-| 公開 | 内閣府が 2026-11-12 に「出典を明記すれば使用可」と回答（2026-11-14 に記録）。公開の準備中 |
+| 公開 | **公開中** https://nagashinocat.github.io/nankai-sim/ （2026-11-14、GitHub Pages・gh-pages ブランチ）。内閣府は 2026-11-12 に「出典を明記すれば使用可」と回答 |
 | 試作版 | 外部通信なしで5か所だけ見られる版（`vite.demo.config.ts`、`demo/`）。Mac の `~/Documents/nankai-sim-preview`（全データ入り、`start.command` で同じ Wi-Fi のスマホから見られる） |
 | 次の作業 | 「いまいる場所から近い避難場所＋簡易地図＋電波なしで使う」の設計案を出したところ（利用者の OK 待ち）。`docs/superpowers/specs/2026-11-12-near-shelters-offline-design.md` |
 

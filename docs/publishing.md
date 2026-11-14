@@ -78,3 +78,15 @@
 | 公開してよいか（可 / 条件付き可 / 不可） | 条件付き可（出典の明記） |
 | 条件（出典表記の指定など） | 出典を明記すること（表記の指定はなし）。本アプリでは第3条どおり「内閣府 南海トラフの巨大地震モデル・被害想定手法検討会」と、加工した値である旨を表示する。念のため、元データ（data/raw/naikaku*）そのものの配布は引き続き行わない。 |
 | 記録者 | 利用者（電話で確認）、2026-11-14 に Claude が記入 |
+
+## 公開先（2026-11-14〜）
+
+- GitHub Pages: https://nagashinocat.github.io/nankai-sim/ （リポジトリ nagashinocat/nankai-sim、`gh-pages` ブランチの `/(root)`）
+- 更新のしかた（リポジトリのルートで）:
+  ```sh
+  rm -rf dist && ALLOW_HAZARD_PUBLISH=1 npx vite build --base=/nankai-sim/ && ALLOW_HAZARD_PUBLISH=1 npx tsx scripts/check_publish.ts dist
+  touch dist/.nojekyll
+  # dist の中身だけを gh-pages ブランチとして送る（履歴は持たない）
+  cd dist && git init -q -b gh-pages && git add -A && git commit -qm "公開版" && git push -f https://github.com/nagashinocat/nankai-sim gh-pages && rm -rf .git
+  ```
+- 2026-11-14 の公開後の確認: トップが開く／尾鷲市中村町で結果（震度・津波・避難場所・地図）が出る／`data/hazard/L2/999999.json` が 404（404.html）
