@@ -9,7 +9,7 @@
 // - 専用キャッシュは名前の接頭辞が違う（nankai-offline-…）ので、activate で消さない。保存の要求（x-nankai-offline-save）には触らない
 // - 別オリジン（地理院の地図タイル・住所検索）には触らない
 // 下の BUILD_ID の値はビルド時に置き換わる（ビルドごとに sw.js が変わり、古いキャッシュは activate で削除）。
-const BUILD_ID = '3fa1b7308c';
+const BUILD_ID = '44ecafb022';
 const CACHE = `nankai-sim-${BUILD_ID}`;
 const SCOPE = self.registration.scope; // 末尾 '/' 付きの完全なURL
 const SCOPE_PATH = new URL(SCOPE).pathname;
