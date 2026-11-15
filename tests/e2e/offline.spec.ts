@@ -59,6 +59,13 @@ test('一度結果を出した後、通信が切れていても前回の結果�
 // ---- 近い避難場所を電波なしで（避難場所のデータを端末に保存） ----
 const YOKKAICHI = { lat: 34.9667, lon: 136.6247 };
 
+/** データセーバーをオンにする（自動では保存しない端末。手動の保存ボタンを試す） */
+async function saveDataOn(page: import('@playwright/test').Page) {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'connection', { configurable: true, get: () => ({ saveData: true }) });
+  });
+}
+
 async function underServiceWorker(page: import('@playwright/test').Page) {
   await page.route('**/cyberjapandata.gsi.go.jp/**', (r) => r.abort());
   await stubTsunami(page);
@@ -72,6 +79,7 @@ test('避難場所のデータを保存すると、電波なしでも #near に�
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: YOKKAICHI.lat, longitude: YOKKAICHI.lon });
   await page.setViewportSize({ width: 390, height: 844 });
+  await saveDataOn(page);
   await underServiceWorker(page);
   await page.goto('/#near');
   const panel = page.locator('#offline-panel');
@@ -128,6 +136,7 @@ test('避難場所のデータを保存すると、電波なしでも #near に�
 test('保存していないと、電波なしの #near は「保存していないので出せません」とその場でできること', async ({ page, context }) => {
   await context.grantPermissions(['geolocation']);
   await context.setGeolocation({ latitude: YOKKAICHI.lat, longitude: YOKKAICHI.lon });
+  await saveDataOn(page);
   await underServiceWorker(page);
   await context.setOffline(true);
   await page.goto('/#near');
@@ -143,4 +152,107 @@ test('保存していないと、電波なしの #near は「保存していな�
   await expect(page.locator('#offline-save')).toBeDisabled();
   // 国土地理院の注意は電波なしでも出る
   await expect(page.locator('#near').getByText(/出典: 国土地理院 指定緊急避難場所データ/)).toBeVisible();
+});
+
+// ---- 自動保存（電波があるときに開くと、裏で避難場所のデータを保存） ----
+const AUTO_SAVED = /✅ 電波がなくても使えます（\d{4}年\d+月\d+日に自動で保存・[\d,]+か所）/;
+
+test('開くだけで避難場所のデータを自動で保存し、電波なしでも #near に一覧が出る（保存日だけ・住所や座標は保存しない）', async ({ page, context }) => {
+  await context.grantPermissions(['geolocation']);
+  await context.setGeolocation({ latitude: YOKKAICHI.lat, longitude: YOKKAICHI.lon });
+  await underServiceWorker(page); // 1回目の読み込みで始まった保存は、読み込み直しで止まっても続きから
+  await page.goto('/#near');
+  const panel = page.locator('#offline-panel');
+  await expect(panel.locator('#offline-status')).toHaveText(AUTO_SAVED, { timeout: 60_000 });
+  await expect(panel.getByRole('button', { name: /^避難場所のデータをこのスマホに保存/ })).toBeHidden();
+  await expect(panel.locator('#offline-evict')).toHaveText('一度も開いていないスマホでは使えません／iPhone はしばらく開かないと消えることがあります。ホーム画面に追加すると消えにくくなります');
+  const ls = await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).map((k) => [k, localStorage.getItem(k)])));
+  expect(Object.keys(JSON.parse(ls['nankai-sim:shelters-saved']!)).sort()).toEqual(['auto', 'count', 'savedAt', 'updated']);
+  expect(ls['nankai-sim:shelters-auto-pending']).toBeUndefined();
+  expect(JSON.stringify(ls)).not.toMatch(/"(lat|lon|pos)"|34\.96|136\.62/);
+  expect(await page.evaluate(() => caches.keys())).toContain('nankai-offline-shelters-v1');
+
+  await context.setOffline(true);
+  await page.goto('/');
+  await page.locator('#near-entry').click();
+  await expect(page.locator('#near-offline-first')).toHaveCount(0);
+  await page.locator('#near-locate').click();
+  const list = page.locator('#near-list');
+  await expect(list.getByRole('heading', { name: '津波の避難場所（近い順）' })).toBeVisible({ timeout: 30_000 });
+  await expect(list.locator('ol.shelters li').first()).toContainText('直線距離');
+  await expect(page.locator('#offline-status')).toHaveText(AUTO_SAVED);
+  // 開き直しても、保存し終えていれば取り直さない
+  await context.setOffline(false);
+  const saves: string[] = [];
+  page.on('request', (r) => { if (/\/data\/shelters\/\d{6}\.json/.test(r.url())) saves.push(r.url()); });
+  await page.goto('/');
+  await page.waitForTimeout(4000);
+  expect(saves).toEqual([]);
+});
+
+test('データセーバーの端末では自動で保存しない（今のボタンのまま）', async ({ page }) => {
+  await saveDataOn(page);
+  await underServiceWorker(page);
+  await page.waitForTimeout(4000);
+  await page.goto('/#near');
+  await page.waitForTimeout(4000);
+  const panel = page.locator('#offline-panel');
+  await expect(panel.getByText('まだ保存していません。')).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^避難場所のデータをこのスマホに保存（約[\d.]+MB）$/ })).toBeVisible();
+  expect(await page.evaluate(() => caches.keys())).not.toContain('nankai-offline-shelters-v1');
+  expect(await page.evaluate(() => localStorage.getItem('nankai-sim:shelters-saved'))).toBeNull();
+});
+
+test('「保存したデータを消す」を押したら、次に開いても自動で保存しない（ボタンで保存し直すと元に戻る）', async ({ page, context }) => {
+  await context.grantPermissions(['geolocation']);
+  await context.setGeolocation({ latitude: YOKKAICHI.lat, longitude: YOKKAICHI.lon });
+  await underServiceWorker(page);
+  await page.goto('/#near');
+  const panel = page.locator('#offline-panel');
+  await expect(panel.locator('#offline-status')).toHaveText(AUTO_SAVED, { timeout: 60_000 });
+  await panel.getByRole('button', { name: '保存したデータを消す' }).click();
+  await expect(panel.locator('#offline-status')).toContainText('保存したデータを消しました');
+  expect(await page.evaluate(() => localStorage.getItem('nankai-sim:shelters-auto-off'))).toBe('1');
+  await page.reload();
+  await page.waitForTimeout(4000);
+  await expect(panel.getByText('まだ保存していません。')).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^避難場所のデータをこのスマホに保存（約[\d.]+MB）$/ })).toBeVisible();
+  expect(await page.evaluate(() => caches.keys())).not.toContain('nankai-offline-shelters-v1');
+  await expect(panel.locator('#offline-evict')).toHaveText(/^しばらく開かないと/);
+  // 電波なしの #near でも「自動で保存されます」は添えない（自動を止めた端末）
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.locator('#near-offline-first')).toContainText('保存していないので出せません');
+  await expect(page.locator('.near-auto-note')).toHaveCount(0);
+  // ボタンで保存し直すと、自動保存の停止を解除
+  await context.setOffline(false);
+  await page.reload();
+  await panel.getByRole('button', { name: /^避難場所のデータをこのスマホに保存/ }).click();
+  await expect(panel.locator('#offline-status')).toContainText('保存しました', { timeout: 60_000 });
+  expect(await page.evaluate(() => localStorage.getItem('nankai-sim:shelters-auto-off'))).toBeNull();
+});
+
+test('自動保存が失敗しても画面にエラーを出さず、電波なしの #near は「一度開くと自動で保存されます」を添える', async ({ page, context }) => {
+  await context.grantPermissions(['geolocation']);
+  await context.setGeolocation({ latitude: YOKKAICHI.lat, longitude: YOKKAICHI.lon });
+  await context.route(/\/data\/shelters\/\d{6}\.json$/, (r) => r.abort());
+  await underServiceWorker(page);
+  await page.goto('/#near');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('nankai-sim:shelters-auto-pending')), { timeout: 30_000 }).toBe('1');
+  await expect.poll(() => page.locator('#offline-status').textContent(), { timeout: 30_000 }).toBe('まだ保存していません。');
+  await expect(page.locator('#offline-save')).toBeVisible();
+  await expect(page.getByText(/途中で止まりました|読み込めませんでした/)).toHaveCount(0);
+  await context.unroute(/\/data\/shelters\/\d{6}\.json$/);
+  await context.setOffline(true);
+  await page.reload();
+  await expect(page.locator('#near-offline-first')).toContainText('保存していないので出せません');
+  await expect(page.locator('#near-offline-first .near-auto-note')).toHaveText('電波があるときに一度開くと自動で保存されます。');
+  await page.locator('#near-locate').click();
+  await expect(page.locator('#near-not-saved')).toHaveText('電波がなく、避難場所のデータをこのスマホに保存していないので出せません。', { timeout: 30_000 });
+  await expect(page.locator('#near-status .near-auto-note')).toHaveText('電波があるときに一度開くと自動で保存されます。');
+  // 電波が戻って開き直すと、続きから保存する
+  await context.setOffline(false);
+  await page.reload();
+  await expect(page.locator('#offline-status')).toHaveText(AUTO_SAVED, { timeout: 60_000 });
+  expect(await page.evaluate(() => localStorage.getItem('nankai-sim:shelters-auto-pending'))).toBeNull();
 });

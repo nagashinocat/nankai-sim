@@ -11,7 +11,8 @@ export const SHELTERS_SAVED_KEY = 'nankai-sim:shelters-saved';
 export const SAVE_HEADER = 'x-nankai-offline-save';
 
 export type ShelterIndex = { files: string[]; updated: string | null; count: number; bytes: number };
-export type SheltersSaved = { savedAt: string; updated: string | null; count: number };
+/** auto: 自動で保存した（表示の文言だけに使う。手動で保存したときは付けない） */
+export type SheltersSaved = { savedAt: string; updated: string | null; count: number; auto?: true };
 
 export function isShelterIndex(v: unknown): v is ShelterIndex {
   if (!v || typeof v !== 'object') return false;
@@ -27,15 +28,16 @@ export function loadSheltersSaved(store: Pick<Storage, 'getItem'> | null): Shelt
     if (!raw) return null;
     const v = JSON.parse(raw) as Record<string, unknown>;
     if (typeof v.savedAt !== 'string' || typeof v.count !== 'number' || !(v.updated === null || typeof v.updated === 'string')) return null;
-    return { savedAt: v.savedAt, updated: v.updated, count: v.count };
+    return { savedAt: v.savedAt, updated: v.updated, count: v.count, ...(v.auto === true ? { auto: true as const } : {}) };
   } catch {
     return null;
   }
 }
 
 export function writeSheltersSaved(store: Pick<Storage, 'setItem'> | null, v: SheltersSaved): void {
-  // 日付と件数だけ（ほかの項目を混ぜない）
-  try { store?.setItem(SHELTERS_SAVED_KEY, JSON.stringify({ savedAt: v.savedAt, updated: v.updated, count: v.count })); } catch { /* 保存できなくてもデータ自体はキャッシュにある */ }
+  // 日付と件数（と自動かどうか）だけ（ほかの項目を混ぜない）
+  const out = { savedAt: v.savedAt, updated: v.updated, count: v.count, ...(v.auto === true ? { auto: true } : {}) };
+  try { store?.setItem(SHELTERS_SAVED_KEY, JSON.stringify(out)); } catch { /* 保存できなくてもデータ自体はキャッシュにある */ }
 }
 
 export function clearSheltersSaved(store: Pick<Storage, 'removeItem'> | null): void {

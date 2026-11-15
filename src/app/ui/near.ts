@@ -29,6 +29,8 @@ export type NearDeps = {
   covers?(pos: LatLon): Promise<boolean>;
   /** 避難場所のデータを端末に保存しているか */
   isSaved?(): Promise<boolean>;
+  /** この端末は避難場所のデータを自動で保存する対象か（データセーバー・自動を止めた端末は false） */
+  autoSave?(): boolean;
 };
 
 export type NearHandle = { setKids(on: boolean): void; dispose(): void };
@@ -54,6 +56,9 @@ export function renderNear(root: HTMLElement, deps: NearDeps): NearHandle {
   /** 電波がなく、避難場所のデータも保存していない（開いたときに調べる） */
   let offlineUnsaved = false;
   const tsunamiSlot = el('div', { id: 'near-tsunami' });
+
+  /** 自動保存の対象の端末なら「電波があるときに一度開くと自動で保存されます」 */
+  const autoNote = (): Node[] => (deps.autoSave?.() ? [el('p', { class: 'hint near-auto-note' }, NEAR_TEXT.autoNote)] : []);
 
   const set = (s: State): void => { if (!disposed) { state = s; draw(); } };
 
@@ -172,7 +177,7 @@ export function renderNear(root: HTMLElement, deps: NearDeps): NearHandle {
     if (offlineUnsaved && (s0.phase === 'idle' || s0.phase === 'geoError')) {
       head.push(el('section', { class: K ? 'kid-card near-offline-first' : 'card disclaimer near-offline-first', id: 'near-offline-first' },
         el('p', { class: 'strong near-error' }, K ? KIDS_NEAR.notSaved : NEAR_TEXT.notSaved),
-        ...(K ? [] : [todoList()])));
+        ...(K ? [] : [...autoNote(), todoList()])));
     }
 
     const status = el('div', { id: 'near-status', role: 'status', 'aria-live': 'polite' });
@@ -185,7 +190,7 @@ export function renderNear(root: HTMLElement, deps: NearDeps): NearHandle {
       status.append(el('p', { class: 'strong near-error', id: 'near-error' }, msg));
     }
     if (s.phase === 'loadError') {
-      if (s.offline) status.append(el('p', { class: 'strong near-error', id: 'near-not-saved' }, K ? KIDS_NEAR.notSaved : NEAR_TEXT.notSaved));
+      if (s.offline) status.append(el('p', { class: 'strong near-error', id: 'near-not-saved' }, K ? KIDS_NEAR.notSaved : NEAR_TEXT.notSaved), ...(K ? [] : autoNote()));
       else status.append(el('p', { class: 'strong near-error', id: 'near-error' }, K ? KIDS_TEXT.error : NEAR_TEXT.loadFailed));
       if (!K) body.push(todoList());
     }

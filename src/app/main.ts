@@ -28,8 +28,9 @@ import { KIDS_NEAR } from './kids.ts';
 import { NEAR_TEXT } from './near.ts';
 import { renderNear, type NearHandle } from './ui/near.ts';
 import { headingIcon } from './ui/visuals.ts';
-import { renderOfflinePanel } from './ui/offline-panel.ts';
+import { fetchShelterIndex, panelAutoEligible, renderOfflinePanel, type OfflinePanelDeps } from './ui/offline-panel.ts';
 import { savedIndex } from './offline.ts';
+import { saveDataOn, scheduleAutoSave } from './autosave.ts';
 import { MOVE_TEXT, type MoveState, isMoved, movedNote, resetLabel, samePlace } from './movepin.ts';
 
 useFragilityTable(fragility as never);
@@ -38,13 +39,19 @@ const fetcher = (url: string) => fetch(url);
 const ds = createDataSource(fetcher, `${import.meta.env.BASE_URL}data`);
 /** 避難場所のデータを端末に保存する欄（#near・結果画面のおとなの表示だけ。おうちの人の操作） */
 const dataBaseUrl = (): string => new URL(`${import.meta.env.BASE_URL}data`, location.href).href;
-const offlinePanel = (): HTMLElement | null => renderOfflinePanel({
+/** 避難場所のデータの自動保存は、本番ビルドで Service Worker が使えるときだけ（電波なしで使うには SW が要る） */
+const AUTO_SAVE = import.meta.env.PROD && 'serviceWorker' in navigator;
+const offlineDeps = (): OfflinePanelDeps => ({
   base: dataBaseUrl(),
   store: localStore(),
   caches: typeof caches !== 'undefined' ? caches : null,
   fetch: (url, init) => fetch(url, init),
   online: () => navigator.onLine,
+  auto: AUTO_SAVE,
+  saveData: () => saveDataOn(),
+  locks: typeof navigator !== 'undefined' && navigator.locks ? navigator.locks : null,
 });
+const offlinePanel = (): HTMLElement | null => renderOfflinePanel(offlineDeps());
 const tileReader = canvasPixelReader();
 /** 周辺1kmの各マス中心の津波は、タイル数を抑えるため2段階粗いズーム（約1.2km四方のタイル）で読む。 */
 const AREA_TSUNAMI_ZOOM = TSUNAMI_TILE_ZOOM - 2;
@@ -380,6 +387,7 @@ function showNear(): void {
     savePanel: offlinePanel,
     covers: (pos) => ds.covers('L2', latLonToMesh250(pos)),
     isSaved: async () => typeof caches !== 'undefined' && (await savedIndex(caches, dataBaseUrl())) !== null,
+    autoSave: () => panelAutoEligible(offlineDeps()),
   });
 }
 
@@ -430,5 +438,23 @@ drawOffline();
 // Service Worker は本番ビルドのみ（開発サーバーでキャッシュが邪魔をしないように）。
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => { navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => { /* 登録できなくても動く */ }); });
+}
+// 電波があれば、表示が落ち着いてから避難場所のデータを裏で保存（失敗しても画面には出さない。次に開いたとき続きから）
+if (AUTO_SAVE) {
+  const d = offlineDeps();
+  scheduleAutoSave({
+    ...d,
+    saveData: () => saveDataOn(),
+    fetchIndex: () => fetchShelterIndex(d),
+    // 自動保存では、確認の画面が出るブラウザ（Firefox など）で勝手に聞かないよう、聞かずに済むときだけ頼む
+    persist: async () => {
+      try {
+        const st = await navigator.permissions?.query({ name: 'persistent-storage' as PermissionName });
+        if (st && st.state === 'prompt') return false;
+      } catch { /* 調べられなければ頼まない */ return false; }
+      return navigator.storage?.persist?.();
+    },
+    events: window,
+  });
 }
 void showRoute();
